@@ -67,8 +67,8 @@ class DonchianBreakoutStrategy(Strategy):
 
         # Need enough data
         n = cfg.lookback_candles
-        if len(window) < n + 1:
-            log.debug("%s: not enough candles (%d < %d)", symbol, len(window), n + 1)
+        if len(window) < n:
+            log.debug("%s: not enough candles (%d < %d)", symbol, len(window), n)
             return DesiredOrders(symbol=symbol, buy_stop=None, sell_stop=None)
 
         # Regime detection: skip if market is ranging
@@ -81,8 +81,8 @@ class DonchianBreakoutStrategy(Strategy):
                 )
                 return DesiredOrders(symbol=symbol, buy_stop=None, sell_stop=None)
 
-        # Exclude the trigger candle (last closed) from lookback
-        lookback = window[-(n + 1):-1]
+        # Use the last N closed candles for HH/LL (including the most recent)
+        lookback = window[-n:]
         trigger = window[-1]
 
         hh = highest_high(lookback, n)
