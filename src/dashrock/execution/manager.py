@@ -17,6 +17,7 @@ Key improvements over v1:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from datetime import datetime, timezone
@@ -73,6 +74,7 @@ class ExecutionManager:
         self._states: dict[str, SymbolExecutionState] = {}
         self._trailing = TrailingManager(config.trailing)
         self._last_tick_time: dict[str, float] = {}  # throttle trailing updates
+        self._tick_locks: dict[str, asyncio.Lock] = {}  # prevent concurrent trailing
 
     # ─── State Management ────────────────────────────────
 
@@ -526,45 +528,50 @@ class ExecutionManager:
             return
         self._last_tick_time[symbol] = now
 
-        new_sl = self._trailing.update(
-            symbol=symbol,
-            current_price=current_price,
-            entry_price=state.entry_price,
-            current_sl_price=state.sl_price or 0,
-            position_side=state.position_side,
-            state=state,
-        )
+        # Per-symbol lock to prevent concurrent trailing SL placements
+        lock = self._tick_locks.setdefault(symbol, asyncio.Lock())
+        if lock.locked():
+            return  # previous tick still processing, skip
+        async with lock:
+            new_sl = self._trailing.update(
+                symbol=symbol,
+                current_price=current_price,
+                entry_price=state.entry_price,
+                current_sl_price=state.sl_price or 0,
+                position_side=state.position_side,
+                state=state,
+            )
 
-        if new_sl:
-            # Round BEFORE comparing to avoid floating-point thrashing
-            new_sl = self._registry.round_price(symbol, new_sl)
+            if new_sl:
+                # Round BEFORE comparing to avoid floating-point thrashing
+                new_sl = self._registry.round_price(symbol, new_sl)
 
-            if new_sl == state.sl_price:
-                return  # No actual change after rounding
+                if new_sl == state.sl_price:
+                    return  # No actual change after rounding
 
-            # CRITICAL: Cancel old SL first. If cancel fails, do NOT place
-            # a new one — that would stack duplicate SL orders on the exchange.
-            if state.sl_id:
-                cancelled = await self._safe_cancel(symbol, state.sl_id)
-                if not cancelled:
-                    log.warning(
-                        "Trailing SL skip: failed to cancel old SL %s for %s — not placing new one",
-                        state.sl_id, symbol,
-                    )
-                    return
+                # CRITICAL: Cancel old SL first. If cancel fails, do NOT place
+                # a new one — that would stack duplicate SL orders on the exchange.
+                if state.sl_id:
+                    cancelled = await self._safe_cancel(symbol, state.sl_id)
+                    if not cancelled:
+                        log.warning(
+                            "Trailing SL skip: failed to cancel old SL %s for %s — not placing new one",
+                            state.sl_id, symbol,
+                        )
+                        return
 
-            sl_side = OrderSide.SELL if state.position_state == PositionState.LONG else OrderSide.BUY
-            sl_order = await self._safe_place_order(OrderIntent(
-                symbol=symbol, side=sl_side,
-                order_type=OrderType.STOP_MARKET,
-                stop_price=new_sl, quantity=state.position_qty,
-                reduce_only=True, tag=f"trailing_sl_{int(time.time()*1000)}",
-            ))
-            if sl_order:
-                state.sl_id = sl_order.order_id
-                state.sl_price = new_sl  # update cache
-                await self._persist_state(symbol)
-                log.info("Trailing SL moved: %s → %.8g", symbol, new_sl)
+                sl_side = OrderSide.SELL if state.position_state == PositionState.LONG else OrderSide.BUY
+                sl_order = await self._safe_place_order(OrderIntent(
+                    symbol=symbol, side=sl_side,
+                    order_type=OrderType.STOP_MARKET,
+                    stop_price=new_sl, quantity=state.position_qty,
+                    reduce_only=True, tag=f"trailing_sl_{int(time.time()*1000)}",
+                ))
+                if sl_order:
+                    state.sl_id = sl_order.order_id
+                    state.sl_price = new_sl  # update cache
+                    await self._persist_state(symbol)
+                    log.info("Trailing SL moved: %s → %.8g", symbol, new_sl)
 
     # ─── Helpers ─────────────────────────────────────────
 

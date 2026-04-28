@@ -26,7 +26,7 @@ class RegimeDetectionCfg(BaseModel):
 
 class StrategyCfg(BaseModel):
     name: str = "donchian_breakout"
-    lookback_candles: int = Field(ge=2, le=500)
+    lookback_candles: int = Field(ge=1, le=500)
     offset_pips: float = Field(ge=0)
     pending_refresh_mode: Literal["dynamic", "fixed", "hybrid_tighter"] = "dynamic"
     cooldown_candles: int = Field(ge=0)
