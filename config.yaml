@@ -1,0 +1,117 @@
+mode: testnet
+watchlist:
+- BTCUSDT
+- ETHUSDT
+- SOLUSDT
+- BNBUSDT
+- XAGUSDT
+trade_list:
+- XAGUSDT
+timeframe: 1m
+strategy:
+  name: donchian_breakout
+  lookback_candles: 2
+  offset_pips: 0.0
+  pending_refresh_mode: fixed
+  cooldown_candles: 1
+  cooldown_trigger: any_close
+  use_pct_pips: true
+  min_channel_width_pct: 0.0
+  regime_detection:
+    enabled: false
+    method: adx
+    adx_period: 14
+    adx_trending_threshold: 25.0
+    skip_ranging: false
+  params: {}
+sizing:
+  mode: equity_fraction
+  risk_per_trade_pct: 0.1
+  fallback_fixed_usd: 50.0
+  leverage: 20
+portfolio_risk:
+  max_open_positions: 3
+  max_total_exposure_pct: 300.0
+  max_per_symbol_exposure_pct: 100.0
+equity:
+  source: manual
+  manual_value: 1000.0
+stops:
+  sl_pips: 0.25
+  tp_pips: 1.0
+  use_pct_pips: true
+trailing:
+  enabled: true
+  mode: step
+  step_pips: 0.03
+  stop_pips: 0.1
+  activation_pips: 0.15
+  use_pct_pips: true
+reversed_order:
+  mode: hedge
+time_filter:
+  enabled: false
+  timezone: UTC
+  sessions: []
+  weekdays_off: []
+  blackouts: []
+spread:
+  max_pips: 5.0
+  dynamic_atr_mult: 0.2
+  use_dynamic: false
+  log_only: false
+slippage:
+  max_pct: 0.1
+  on_violation: alert
+simulator:
+  taker_fee_pct: 0.04
+  slippage_noise_pips: 0.01
+  starting_equity_usd: 1000.0
+  simulate_funding: true
+  funding_rate_pct: 0.01
+  latency_ms: 0
+volatility:
+  mode: composite
+  weights:
+    natr: 0.4
+    expansion: 0.3
+    donchian_atr: 0.3
+  min_score: 0.2
+  min_24h_volume_usd: 5000000.0
+safety:
+  max_daily_loss_pct: 5.0
+  max_drawdown_pct: 15.0
+  max_consecutive_losses: 5
+  check_on_tick: true
+  tick_check_interval: 100
+  orphan_order_policy: alert_only
+  reconciliation_interval_sec: 300
+database:
+  pool_min: 2
+  pool_max: 10
+auth:
+  enabled: true
+  token_expiry_hours: 24
+logging:
+  level: INFO
+  file: logs/bot.log
+  max_size_mb: 50
+notifications:
+  telegram_bot_token: ''
+  telegram_chat_id: ''
+  discord_webhook: ''
+  events:
+  - trade_opened
+  - trade_closed
+  - error
+  - kill_switch
+  - safety_triggered
+live:
+  auto_set_leverage: true
+  auto_set_margin_type: false
+  margin_type: CROSSED
+  recv_window_ms: 5000
+  listen_key_refresh_sec: 1800
+  startup_reconcile: true
+  max_retries: 3
+  retry_delay_sec: 1.0

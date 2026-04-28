@@ -1,0 +1,22 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.env
+*.db
+.mypy_cache/
+.pytest_cache/
+.hypothesis/
+.ruff_cache/
+.venv/
+venv/
+node_modules/
+logs/
+*.log
+web/dist/
+# Venv at project root (if created without --prefix)
+Include/
+Lib/
+Scripts/
+pyvenv.cfg
