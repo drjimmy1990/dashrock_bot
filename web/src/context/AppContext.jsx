@@ -9,6 +9,7 @@ export function AppProvider({ children }) {
   const [status, setStatus] = useState(null);
   const [toasts, setToasts] = useState([]);
   const [wsData, setWsData] = useState({});
+  const [wsStatus, setWsStatus] = useState('connecting');
 
   const login = async (u, p) => {
     const data = await api.login(u, p);
@@ -47,12 +48,12 @@ export function AppProvider({ children }) {
         toast(`${pnl >= 0 ? '✅' : '❌'} ${msg.data.symbol} closed — PnL: $${pnl?.toFixed(2)} (${msg.data.reason})`, pnl >= 0 ? 'success' : 'error');
       }
       if (msg.type === 'safety') toast(`⚠️ Safety: ${msg.data.reason}`, 'warning');
-    });
+    }, setWsStatus);
   }, [token, toast]);
 
   return (
     <AppCtx.Provider value={{ token, login, logout, status, toast, toasts }}>
-      <WsCtx.Provider value={wsData}>
+      <WsCtx.Provider value={{ ...wsData, _wsStatus: wsStatus }}>
         {children}
       </WsCtx.Provider>
     </AppCtx.Provider>
@@ -64,3 +65,4 @@ export const useApp = () => useContext(AppCtx);
 
 /** WebSocket live data — updates frequently, only use in pages that need it */
 export const useWsData = () => useContext(WsCtx);
+

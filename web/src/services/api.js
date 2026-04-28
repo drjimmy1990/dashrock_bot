@@ -48,7 +48,7 @@ export const api = {
   clearTrades: () => request('/api/trades', { method: 'DELETE' }),
 };
 
-export function connectWS(onMessage) {
+export function connectWS(onMessage, onStatusChange) {
   const token = getToken();
   const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
   const isDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
@@ -62,7 +62,11 @@ export function connectWS(onMessage) {
     if (disposed) return;
     try {
       ws = new WebSocket(wsUrl);
-      ws.onopen = () => { console.log('[WS] Connected'); backoff = 2000; };
+      ws.onopen = () => {
+        console.log('[WS] Connected');
+        backoff = 2000;
+        onStatusChange?.('connected');
+      };
       ws.onmessage = (e) => { 
         try { 
           const msg = JSON.parse(e.data);
@@ -73,11 +77,13 @@ export function connectWS(onMessage) {
       ws.onclose = (e) => {
         if (e.code === 4001) {
           console.warn('[WS] Auth rejected — clearing token and reloading');
+          onStatusChange?.('auth_failed');
           localStorage.removeItem('dashrock_token');
           window.location.reload();
           return;
         }
         console.log('[WS] Closed, reconnecting in', backoff, 'ms');
+        onStatusChange?.('disconnected');
         if (!disposed) {
           reconnectTimer = setTimeout(connect, backoff);
           backoff = Math.min(backoff * 1.5, maxBackoff);
@@ -91,3 +97,4 @@ export function connectWS(onMessage) {
   connect();
   return () => { disposed = true; clearTimeout(reconnectTimer); try { ws?.close(); } catch {} };
 }
+
