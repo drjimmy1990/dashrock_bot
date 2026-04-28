@@ -422,6 +422,9 @@ class Application:
         self.bus.subscribe(PositionClosed, self._ws_bridge_position_closed)
         self.bus.subscribe(SafetyTriggered, self._ws_bridge_safety)
         self.bus.subscribe(EquityUpdate, self._ws_bridge_equity)
+        
+        from dashrock.core.events import TrailingMoved
+        self.bus.subscribe(TrailingMoved, self._ws_bridge_trailing_moved)
 
     # ─── Main Loop ───────────────────────────────────
 
@@ -629,6 +632,11 @@ class Application:
     async def _ws_bridge_order_cancelled(self, e: OrderCancelled) -> None:
         await ws_manager.broadcast_json({"type": "order_cancelled", "data": {
             "symbol": e.symbol, "order_id": e.order_id,
+        }})
+
+    async def _ws_bridge_trailing_moved(self, e) -> None:
+        await ws_manager.broadcast_json({"type": "trailing_moved", "data": {
+            "symbol": e.symbol, "new_sl": e.new_sl,
         }})
 
     async def _ws_bridge_position_opened(self, e: PositionOpened) -> None:

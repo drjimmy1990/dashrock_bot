@@ -58,6 +58,7 @@ export default function LogsPage() {
                     l.type.includes('position') ? 'badge-purple' :
                     l.type === 'order_placed' ? 'badge-blue' :
                     l.type === 'order_cancelled' ? 'badge-yellow' :
+                    l.type === 'trailing_moved' ? 'badge-blue' :
                     l.type === 'tick' ? '' : 'badge-blue'
                   }`} style={{ flexShrink: 0 }}>{l.type.replace('_', ' ')}</span>
                   <span style={{ color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{l.data}</span>

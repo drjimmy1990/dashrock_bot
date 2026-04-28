@@ -572,6 +572,8 @@ class ExecutionManager:
                     state.sl_price = new_sl  # update cache
                     await self._persist_state(symbol)
                     log.info("Trailing SL moved: %s → %.8g", symbol, new_sl)
+                    from dashrock.core.events import TrailingMoved
+                    await self._bus.publish(TrailingMoved(symbol=symbol, new_sl=new_sl))
 
     # ─── Helpers ─────────────────────────────────────────
 

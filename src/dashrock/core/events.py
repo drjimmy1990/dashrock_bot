@@ -92,6 +92,12 @@ class OrderCancelled:
 
 
 @dataclass(frozen=True)
+class TrailingMoved:
+    symbol: str
+    new_sl: float
+
+
+@dataclass(frozen=True)
 class FillEvent:
     fill: Fill
 
