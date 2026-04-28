@@ -63,7 +63,13 @@ export function connectWS(onMessage) {
     try {
       ws = new WebSocket(wsUrl);
       ws.onopen = () => { console.log('[WS] Connected'); backoff = 2000; };
-      ws.onmessage = (e) => { try { onMessage(JSON.parse(e.data)); } catch {} };
+      ws.onmessage = (e) => { 
+        try { 
+          const msg = JSON.parse(e.data);
+          onMessage(msg); 
+          window.dispatchEvent(new CustomEvent('ws_message', { detail: msg }));
+        } catch {} 
+      };
       ws.onclose = () => {
         if (!disposed) {
           reconnectTimer = setTimeout(connect, backoff);

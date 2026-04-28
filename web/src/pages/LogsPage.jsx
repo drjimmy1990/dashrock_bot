@@ -11,18 +11,21 @@ export default function LogsPage() {
 
   // Capture WebSocket events as log entries
   useEffect(() => {
-    if (!wsData?._last) return;
-    const msg = wsData._last;
+    const handleWs = (e) => {
+      const msg = e.detail;
+      // Filter out noisy events unless user opts in
+      if (!showTicks && NOISY_TYPES.has(msg.type)) return;
 
-    // Filter out noisy events unless user opts in
-    if (!showTicks && NOISY_TYPES.has(msg.type)) return;
+      setLogs(prev => [{
+        time: new Date().toLocaleTimeString(),
+        type: msg.type,
+        data: JSON.stringify(msg.data),
+      }, ...prev.slice(0, 199)]);
+    };
 
-    setLogs(prev => [{
-      time: new Date().toLocaleTimeString(),
-      type: msg.type,
-      data: JSON.stringify(msg.data),
-    }, ...prev.slice(0, 199)]);
-  }, [wsData?._last, showTicks]);
+    window.addEventListener('ws_message', handleWs);
+    return () => window.removeEventListener('ws_message', handleWs);
+  }, [showTicks]);
 
   return (
     <>
