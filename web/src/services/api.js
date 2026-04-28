@@ -70,7 +70,14 @@ export function connectWS(onMessage) {
           window.dispatchEvent(new CustomEvent('ws_message', { detail: msg }));
         } catch {} 
       };
-      ws.onclose = () => {
+      ws.onclose = (e) => {
+        if (e.code === 4001) {
+          console.warn('[WS] Auth rejected — clearing token and reloading');
+          localStorage.removeItem('dashrock_token');
+          window.location.reload();
+          return;
+        }
+        console.log('[WS] Closed, reconnecting in', backoff, 'ms');
         if (!disposed) {
           reconnectTimer = setTimeout(connect, backoff);
           backoff = Math.min(backoff * 1.5, maxBackoff);

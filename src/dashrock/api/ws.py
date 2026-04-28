@@ -63,16 +63,18 @@ def create_ws_router(auth_enabled: bool = True) -> APIRouter:
         # Auth check via query param
         if auth_enabled:
             if not token:
+                log.warning("WS rejected: no token provided")
                 await websocket.close(code=4001, reason="Token required")
                 return
             try:
                 verify_token(token)
             except Exception:
+                log.warning("WS rejected: invalid/expired token")
                 await websocket.close(code=4001, reason="Unauthorized")
                 return
 
         ws_manager.active_connections.append(websocket)
-        log.debug("WS client connected (%d total)", len(ws_manager.active_connections))
+        log.info("WS client connected (%d total)", len(ws_manager.active_connections))
         try:
             while True:
                 await websocket.receive_text()
@@ -82,5 +84,6 @@ def create_ws_router(auth_enabled: bool = True) -> APIRouter:
             pass
         finally:
             ws_manager.disconnect(websocket)
+            log.info("WS client disconnected (%d total)", len(ws_manager.active_connections))
 
     return router
