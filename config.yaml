@@ -42,10 +42,10 @@ stops:
   use_pct_pips: true
 trailing:
   enabled: true
-  mode: step
+  mode: activation_trail
   step_pips: 0.03
   stop_pips: 0.1
-  activation_pips: 0.15
+  activation_pips: 0.1
   use_pct_pips: true
 reversed_order:
   mode: hedge

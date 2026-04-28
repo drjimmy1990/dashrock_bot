@@ -98,6 +98,9 @@ class BinanceLiveAdapter(ExecutionAdapter):
         # Position mode: True = hedge (dual side), False = one-way
         self._hedge_mode: bool = False
 
+        # Partial fill accumulator: buffer micro-fills until FILLED
+        self._partial_fills: dict[str, dict] = {}  # order_id → {qty, fee, count}
+
     # ─── Lifecycle ───────────────────────────────────────────
 
     async def start(self) -> None:
@@ -585,21 +588,53 @@ class BinanceLiveAdapter(ExecutionAdapter):
             pass
 
     async def _handle_order_update(self, msg: dict) -> None:
-        """Convert Binance ORDER_TRADE_UPDATE to a Fill and invoke callback."""
+        """Convert Binance ORDER_TRADE_UPDATE to a Fill and invoke callback.
+
+        Aggregates PARTIALLY_FILLED events into a single Fill emitted on FILLED.
+        This prevents the execution manager from placing duplicate SL/TP orders
+        for each micro-fill that Binance sends during order execution.
+        """
         order_data = msg.get("o", {})
         status = order_data.get("X", "")
+        order_id = str(order_data["i"])
 
-        # Only process actual fills
-        if status not in ("FILLED", "PARTIALLY_FILLED"):
+        if status == "PARTIALLY_FILLED":
+            # Accumulate — do NOT forward to engine yet
+            acc = self._partial_fills.setdefault(order_id, {"qty": 0.0, "fee": 0.0, "count": 0})
+            acc["qty"] += float(order_data["l"])  # last filled qty
+            acc["fee"] += float(order_data.get("n", 0))
+            acc["count"] += 1
+            log.debug(
+                "Partial fill %s: +%.8g (accumulated: %.8g in %d parts)",
+                order_id, float(order_data["l"]), acc["qty"], acc["count"],
+            )
             return
 
+        if status != "FILLED":
+            return
+
+        # FILLED — merge with any accumulated partials
+        last_qty = float(order_data["l"])  # this last fill's qty
+        last_fee = float(order_data.get("n", 0))
+        acc = self._partial_fills.pop(order_id, None)
+        if acc:
+            total_qty = acc["qty"] + last_qty
+            total_fee = acc["fee"] + last_fee
+            log.info(
+                "Aggregated %d partial fills for order %s → total qty=%.8g",
+                acc["count"] + 1, order_id, total_qty,
+            )
+        else:
+            total_qty = last_qty
+            total_fee = last_fee
+
         fill = Fill(
-            order_id=str(order_data["i"]),  # orderId
+            order_id=order_id,
             symbol=order_data["s"],  # symbol
             side=OrderSide(order_data["S"]),  # side
-            price=float(order_data["ap"]),  # average price
-            quantity=float(order_data["l"]),  # last filled qty (this fill)
-            fee=float(order_data.get("n", 0)),  # commission
+            price=float(order_data["ap"]),  # average price (across all partials)
+            quantity=total_qty,
+            fee=total_fee,
             timestamp_ms=int(msg.get("T", time.time() * 1000)),  # transaction time
             tag=order_data.get("c", ""),  # clientOrderId
         )

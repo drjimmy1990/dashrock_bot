@@ -1,31 +1,32 @@
-import { useState, useEffect } from 'react';
-import { useWsData } from '../context/AppContext';
+import { useState, useEffect, useRef } from 'react';
 
 // Events that are too noisy for the default log view
 const NOISY_TYPES = new Set(['tick', 'candle', 'book_ticker']);
 
 export default function LogsPage() {
-  const wsData = useWsData();
   const [logs, setLogs] = useState([]);
   const [showTicks, setShowTicks] = useState(false);
+  const showTicksRef = useRef(showTicks);
+  showTicksRef.current = showTicks;
 
-  // Capture WebSocket events as log entries
+  // Listen to ws_message CustomEvent from the shared AppContext WebSocket.
+  // Uses a ref for showTicks so the listener never needs to re-register,
+  // avoiding HMR-triggered reconnect thrashing.
   useEffect(() => {
     const handleWs = (e) => {
       const msg = e.detail;
-      // Filter out noisy events unless user opts in
-      if (!showTicks && NOISY_TYPES.has(msg.type)) return;
+      if (!showTicksRef.current && NOISY_TYPES.has(msg.type)) return;
 
       setLogs(prev => [{
         time: new Date().toLocaleTimeString(),
         type: msg.type,
         data: JSON.stringify(msg.data),
-      }, ...prev.slice(0, 199)]);
+      }, ...prev.slice(0, 499)]);
     };
 
     window.addEventListener('ws_message', handleWs);
     return () => window.removeEventListener('ws_message', handleWs);
-  }, [showTicks]);
+  }, []); // Empty deps — never re-registers
 
   return (
     <>
