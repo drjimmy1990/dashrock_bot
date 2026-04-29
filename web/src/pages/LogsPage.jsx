@@ -3,57 +3,53 @@ import { useWsData } from '../context/AppContext';
 
 // Events that are too noisy for the default log view
 const NOISY_TYPES = new Set(['tick', 'candle', 'book_ticker']);
-
-// ─── Module-level log store (survives navigation) ───
 const MAX_LOGS = 500;
-let _logs = [];
-let _listeners = new Set();
+
+// ─── Window-level log store (survives HMR + navigation) ───
+if (!window.__dr_logs) {
+  window.__dr_logs = [];
+  window.__dr_listeners = new Set();
+  window.__dr_wsAttached = false;
+}
 
 function _notify() {
-  _listeners.forEach(fn => fn());
+  window.__dr_listeners.forEach(fn => fn());
 }
 
 function addLog(entry) {
-  _logs = [entry, ..._logs.slice(0, MAX_LOGS - 1)];
+  window.__dr_logs = [entry, ...window.__dr_logs.slice(0, MAX_LOGS - 1)];
   _notify();
 }
 
 function clearLogs() {
-  _logs = [];
+  window.__dr_logs = [];
   _notify();
 }
 
 function subscribe(listener) {
-  _listeners.add(listener);
-  return () => _listeners.delete(listener);
+  window.__dr_listeners.add(listener);
+  return () => window.__dr_listeners.delete(listener);
 }
 
 function getSnapshot() {
-  return _logs;
+  return window.__dr_logs;
 }
 
-// Format a timestamp — prefer server time, fallback to browser time
+// Format timestamp — use server time (timestamp_ms) when available
 function formatTime(data) {
-  // Try server timestamp (ms since epoch)
   const ts = data?.timestamp_ms || data?.ts;
   if (ts && ts > 1000000000000) {
-    return new Date(ts).toLocaleTimeString();
+    return new Date(ts).toLocaleTimeString('en-GB', { hour12: false });
   }
-  return new Date().toLocaleTimeString();
+  return new Date().toLocaleTimeString('en-GB', { hour12: false });
 }
 
-// ─── Global WS listener (registered once, never re-registered) ───
-let _wsListenerAttached = false;
-
-function ensureWsListener() {
-  if (_wsListenerAttached) return;
-  _wsListenerAttached = true;
-
+// ─── Global WS listener (attached ONCE on window, survives HMR) ───
+if (!window.__dr_wsAttached) {
+  window.__dr_wsAttached = true;
   window.addEventListener('ws_message', (e) => {
     const msg = e.detail;
-    // Always store non-noisy events; noisy ones are filtered at render time
-    if (NOISY_TYPES.has(msg.type)) return;
-
+    if (NOISY_TYPES.has(msg.type)) return; // noisy events handled by tick listener below
     addLog({
       time: formatTime(msg.data),
       type: msg.type,
@@ -62,32 +58,26 @@ function ensureWsListener() {
   });
 }
 
-// Attach immediately on module load
-ensureWsListener();
-
 export default function LogsPage() {
   const wsData = useWsData();
   const wsStatus = wsData?._wsStatus || 'connecting';
   const logs = useSyncExternalStore(subscribe, getSnapshot);
   const [showTicks, setShowTicks] = useState(false);
-
-  // Separate tick listener (only active when showTicks is on)
   const showTicksRef = useRef(showTicks);
   showTicksRef.current = showTicks;
 
+  // Separate tick listener (only captures ticks when toggle is ON)
   useEffect(() => {
     const handleTick = (e) => {
       const msg = e.detail;
-      if (!NOISY_TYPES.has(msg.type)) return; // non-noisy handled by global listener
+      if (!NOISY_TYPES.has(msg.type)) return;
       if (!showTicksRef.current) return;
-
       addLog({
         time: formatTime(msg.data),
         type: msg.type,
         data: JSON.stringify(msg.data),
       });
     };
-
     window.addEventListener('ws_message', handleTick);
     return () => window.removeEventListener('ws_message', handleTick);
   }, []);
