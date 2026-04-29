@@ -329,34 +329,89 @@ class ExecutionManager:
         # Handle opposite pending order
         await self._handle_opposite_order(state, fill)
 
-        # Place SL
-        sl_price = self._calculate_sl_price(
-            OrderIntent(
-                symbol=fill.symbol, side=fill.side,
-                order_type=OrderType.STOP_MARKET,
-                stop_price=fill.price, quantity=0,
-            )
-        )
-        sl_price = self._registry.round_price(fill.symbol, sl_price)
+        # Place SL — different logic for binance_native vs custom trailing
         sl_side = OrderSide.SELL if fill.side == OrderSide.BUY else OrderSide.BUY
-        sl_order = await self._safe_place_order(OrderIntent(
-            symbol=fill.symbol, side=sl_side,
-            order_type=OrderType.STOP_MARKET,
-            stop_price=sl_price, quantity=fill.quantity,
-            reduce_only=True, tag=f"sl_{int(time.time()*1000)}",
-        ))
-        if sl_order:
-            state.sl_id = sl_order.order_id
-            state.sl_price = sl_price  # cached — no more API queries!
-        else:
-            # SL placement failed (likely -2021: price already past SL level).
-            # Set sl_price anyway so the emergency handler (on_tick) can detect
-            # the breach and close at market on the next tick.
-            log.warning("Initial SL placement failed for %s — emergency handler will take over", fill.symbol)
-            state.sl_id = None
-            state.sl_price = sl_price
 
-        # Place TP
+        if self._cfg.trailing.enabled and self._cfg.trailing.mode == "binance_native":
+            # ── Binance Native Trailing Stop ──
+            # One order, Binance tracks the watermark server-side. No cancel/replace loop.
+            callback_rate = self._cfg.trailing.stop_pips  # maps directly to callbackRate %
+
+            # Calculate activation price (optional)
+            activate_price = None
+            if self._cfg.trailing.activation_pips > 0:
+                if fill.side == OrderSide.BUY:  # LONG — activate when price rises
+                    activate_price = fill.price * (1 + self._cfg.trailing.activation_pips / 100.0)
+                else:  # SHORT — activate when price drops
+                    activate_price = fill.price * (1 - self._cfg.trailing.activation_pips / 100.0)
+                activate_price = self._registry.round_price(fill.symbol, activate_price)
+
+            sl_order = await self._safe_place_order(OrderIntent(
+                symbol=fill.symbol, side=sl_side,
+                order_type=OrderType.TRAILING_STOP_MARKET,
+                stop_price=None, quantity=fill.quantity,
+                reduce_only=True,
+                callback_rate=callback_rate,
+                activate_price=activate_price,
+                tag=f"native_tsl_{int(time.time()*1000)}",
+            ))
+            if sl_order:
+                state.sl_id = sl_order.order_id
+                state.sl_price = activate_price or fill.price  # for display
+                log.info(
+                    "NATIVE TSL placed: %s callback=%.2f%% activate=%s",
+                    fill.symbol, callback_rate,
+                    f"{activate_price:.8g}" if activate_price else "immediate",
+                )
+            else:
+                # Fallback: place fixed SL if native trailing fails
+                log.warning("Native TSL failed for %s — placing fixed SL fallback", fill.symbol)
+                sl_price = self._calculate_sl_price(OrderIntent(
+                    symbol=fill.symbol, side=fill.side,
+                    order_type=OrderType.STOP_MARKET,
+                    stop_price=fill.price, quantity=0,
+                ))
+                sl_price = self._registry.round_price(fill.symbol, sl_price)
+                fallback = await self._safe_place_order(OrderIntent(
+                    symbol=fill.symbol, side=sl_side,
+                    order_type=OrderType.STOP_MARKET,
+                    stop_price=sl_price, quantity=fill.quantity,
+                    reduce_only=True, tag=f"sl_fallback_{int(time.time()*1000)}",
+                ))
+                if fallback:
+                    state.sl_id = fallback.order_id
+                    state.sl_price = sl_price
+                else:
+                    state.sl_id = None
+                    state.sl_price = sl_price
+        else:
+            # ── Custom Trailing (step / activation_trail) ──
+            sl_price = self._calculate_sl_price(
+                OrderIntent(
+                    symbol=fill.symbol, side=fill.side,
+                    order_type=OrderType.STOP_MARKET,
+                    stop_price=fill.price, quantity=0,
+                )
+            )
+            sl_price = self._registry.round_price(fill.symbol, sl_price)
+            sl_order = await self._safe_place_order(OrderIntent(
+                symbol=fill.symbol, side=sl_side,
+                order_type=OrderType.STOP_MARKET,
+                stop_price=sl_price, quantity=fill.quantity,
+                reduce_only=True, tag=f"sl_{int(time.time()*1000)}",
+            ))
+            if sl_order:
+                state.sl_id = sl_order.order_id
+                state.sl_price = sl_price
+            else:
+                log.warning("Initial SL placement failed for %s — emergency handler will take over", fill.symbol)
+                state.sl_id = None
+                state.sl_price = sl_price
+
+        # Initialize trailing (no-op for binance_native mode)
+        self._trailing.initialize(fill.symbol, fill.price, fill.side)
+
+        # Place TP (independent of trailing mode)
         if self._cfg.stops.tp_pips > 0:
             if self._cfg.stops.use_pct_pips:
                 tp_distance = fill.price * (self._cfg.stops.tp_pips / 100.0)
@@ -379,9 +434,6 @@ class ExecutionManager:
                 state.tp_id = tp_order.order_id
                 state.tp_price = tp_price
 
-        # Initialize trailing
-        self._trailing.initialize(fill.symbol, fill.price, fill.side)
-
         # Persist and emit event
         await self._persist_state(fill.symbol)
         await self._bus.publish(PositionOpened(
@@ -393,8 +445,9 @@ class ExecutionManager:
     async def _handle_exit_fill(self, state: SymbolExecutionState, fill: Fill) -> None:
         """Position closed — calculate PnL, record trade, start cooldown."""
         # Determine exit reason
-        if fill.order_id == state.sl_id or fill.tag.startswith(("sl_", "tsl_", "trailing_sl_")):
-            exit_reason = ExitReason.TRAILING_STOP if self._trailing.is_active(fill.symbol) else ExitReason.STOP_LOSS
+        if fill.order_id == state.sl_id or fill.tag.startswith(("sl_", "tsl_", "trailing_sl_", "native_tsl_")):
+            is_trailing = self._trailing.is_active(fill.symbol) or self._cfg.trailing.mode == "binance_native"
+            exit_reason = ExitReason.TRAILING_STOP if is_trailing else ExitReason.STOP_LOSS
         elif fill.order_id == state.tp_id or fill.tag.startswith("tp_"):
             exit_reason = ExitReason.TAKE_PROFIT
         elif fill.tag.startswith("reversal_close_only_"):
@@ -535,6 +588,10 @@ class ExecutionManager:
         """
         state = self.get_state(symbol)
         if not state.has_position or not self._cfg.trailing.enabled:
+            return
+
+        # Binance native trailing is handled server-side — no custom logic needed
+        if self._cfg.trailing.mode == "binance_native":
             return
 
         # EMERGENCY: If sl_id is None but we have a position, the SL was lost

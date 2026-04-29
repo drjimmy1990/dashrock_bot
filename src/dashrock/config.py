@@ -69,7 +69,7 @@ class StopsCfg(BaseModel):
 
 class TrailingCfg(BaseModel):
     enabled: bool = True
-    mode: Literal["step", "activation_trail", "off"] = "step"
+    mode: Literal["step", "activation_trail", "binance_native", "off"] = "step"
     step_pips: float = Field(ge=0)
     stop_pips: float = Field(ge=0)
     activation_pips: float = Field(ge=0)

@@ -377,24 +377,25 @@ export default function SettingsPage() {
           <Field label="Trailing Enabled" hint="Ratchet SL in your favor as price moves"
             path="trailing.enabled" type="toggle"
             draft={draft} update={update} />
-          <Field label="Trailing Mode" hint="Step = fixed increments, Activation = after profit threshold"
+          <Field label="Trailing Mode" hint="Step = fixed increments, Activation = after profit %, Binance Native = server-side (recommended)"
             path="trailing.mode" type="select"
             options={[
               { value: 'step', label: 'Step — move SL every N%' },
               { value: 'activation_trail', label: 'Activation — trail after profit %' },
+              { value: 'binance_native', label: 'Binance Native — server-side trailing ✨' },
               { value: 'off', label: 'Off — no trailing' },
             ]}
             draft={draft} update={update} />
-          <Field label="Trailing Step %" hint="SL moves up by this % each step"
+          <Field label="Trailing Step %" hint="Step mode only: SL moves up by this % each step"
             path="trailing.step_pips" type="number"
             draft={draft} update={update} />
-          <Field label="Trailing Stop %" hint="Distance behind price for trailing SL"
+          <Field label="Trailing Stop % / Callback Rate" hint="Trail distance behind price (also used as callbackRate % for Binance Native, min 0.1)"
             path="trailing.stop_pips" type="number"
             draft={draft} update={update} />
-          <Field label="Trailing Activation %" hint="Profit needed before trailing starts"
+          <Field label="Trailing Activation %" hint="Profit needed before trailing starts (also sets activatePrice for Binance Native)"
             path="trailing.activation_pips" type="number"
             draft={draft} update={update} />
-          <Field label="Use Pct Pips (Trailing)" hint="If ON, trailing values are percentages."
+          <Field label="Use Pct Pips (Trailing)" hint="If ON, trailing values are percentages. Binance Native always uses %."
             path="trailing.use_pct_pips" type="toggle"
             draft={draft} update={update} />
         </Section>

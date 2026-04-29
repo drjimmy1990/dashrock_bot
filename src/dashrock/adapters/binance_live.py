@@ -54,6 +54,7 @@ _ORDER_TYPE_MAP = {
     OrderType.MARKET: "MARKET",
     OrderType.STOP_MARKET: "STOP_MARKET",
     OrderType.TAKE_PROFIT_MARKET: "TAKE_PROFIT_MARKET",
+    OrderType.TRAILING_STOP_MARKET: "TRAILING_STOP_MARKET",
     OrderType.LIMIT: "LIMIT",
 }
 
@@ -240,7 +241,9 @@ class BinanceLiveAdapter(ExecutionAdapter):
             s = f"{val:.8f}".rstrip('0').rstrip('.')
             return s if s else "0"
 
-        is_algo = intent.order_type in (OrderType.STOP_MARKET, OrderType.TAKE_PROFIT_MARKET)
+        is_algo = intent.order_type in (
+            OrderType.STOP_MARKET, OrderType.TAKE_PROFIT_MARKET, OrderType.TRAILING_STOP_MARKET,
+        )
         endpoint = "/fapi/v1/algoOrder" if is_algo else "/fapi/v1/order"
 
         params: dict[str, Any] = {
@@ -252,7 +255,13 @@ class BinanceLiveAdapter(ExecutionAdapter):
             params["algoType"] = "CONDITIONAL"
             params["type"] = _ORDER_TYPE_MAP[intent.order_type]
             params["quantity"] = _fmt(intent.quantity)
-            if intent.stop_price:
+            if intent.order_type == OrderType.TRAILING_STOP_MARKET:
+                # Native trailing: callbackRate + optional activatePrice
+                if intent.callback_rate is not None:
+                    params["callbackRate"] = _fmt(intent.callback_rate)
+                if intent.activate_price is not None:
+                    params["activatePrice"] = _fmt(intent.activate_price)
+            elif intent.stop_price:
                 params["triggerPrice"] = _fmt(intent.stop_price)
         else:
             params["type"] = _ORDER_TYPE_MAP[intent.order_type]

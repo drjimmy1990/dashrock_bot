@@ -29,6 +29,7 @@ class OrderType(str, Enum):
     MARKET = "MARKET"
     STOP_MARKET = "STOP_MARKET"
     TAKE_PROFIT_MARKET = "TAKE_PROFIT_MARKET"
+    TRAILING_STOP_MARKET = "TRAILING_STOP_MARKET"
     LIMIT = "LIMIT"
 
 
@@ -97,6 +98,8 @@ class OrderIntent:
     quantity: float
     reduce_only: bool = False
     tag: str = ""  # e.g. "entry_buy_stop", "sl", "tp"
+    callback_rate: float | None = None      # For TRAILING_STOP_MARKET (0.1-10 %)
+    activate_price: float | None = None     # For TRAILING_STOP_MARKET activation
 
 
 @dataclass

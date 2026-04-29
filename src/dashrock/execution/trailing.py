@@ -46,7 +46,7 @@ class TrailingManager:
 
         Returns new SL price if it should be moved, None if no change needed.
         """
-        if not self._cfg.enabled or self._cfg.mode == "off":
+        if not self._cfg.enabled or self._cfg.mode in ("off", "binance_native"):
             return None
 
         if position_side is None:
