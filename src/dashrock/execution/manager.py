@@ -435,6 +435,11 @@ class ExecutionManager:
         if state.pending_reversal_id:
             await self._safe_cancel(fill.symbol, state.pending_reversal_id)
 
+        # Cancel any remaining entry orders (opposite side from hedge mode, etc.)
+        for entry_id in [state.entry_buy_id, state.entry_sell_id]:
+            if entry_id:
+                await self._safe_cancel(fill.symbol, entry_id)
+
         # Emit event
         await self._bus.publish(PositionClosed(
             symbol=fill.symbol,
@@ -446,7 +451,7 @@ class ExecutionManager:
             timestamp_ms=fill.timestamp_ms,
         ))
 
-        # Reset state + start cooldown
+        # Reset ALL state + start cooldown
         self._trailing.clear(fill.symbol)
         state.position_state = PositionState.FLAT
         state.position_qty = 0.0
@@ -457,6 +462,10 @@ class ExecutionManager:
         state.sl_price = None
         state.tp_id = None
         state.tp_price = None
+        state.entry_buy_id = None
+        state.entry_buy_stop_price = None
+        state.entry_sell_id = None
+        state.entry_sell_stop_price = None
         state.trailing_watermark = 0.0
         state.pending_reversal_id = None
         state.accumulated_funding = 0.0
@@ -521,6 +530,26 @@ class ExecutionManager:
         if not state.has_position or not self._cfg.trailing.enabled:
             return
 
+        # EMERGENCY: If sl_id is None but we have a position, the SL was lost
+        # (failed trailing placement). Re-place it immediately, no throttle.
+        if state.sl_id is None and state.sl_price:
+            lock = self._tick_locks.setdefault(symbol, asyncio.Lock())
+            if lock.locked():
+                return
+            async with lock:
+                sl_side = OrderSide.SELL if state.position_state == PositionState.LONG else OrderSide.BUY
+                sl_order = await self._safe_place_order(OrderIntent(
+                    symbol=symbol, side=sl_side,
+                    order_type=OrderType.STOP_MARKET,
+                    stop_price=state.sl_price, quantity=state.position_qty,
+                    reduce_only=True, tag=f"emergency_sl_{int(time.time()*1000)}",
+                ))
+                if sl_order:
+                    state.sl_id = sl_order.order_id
+                    await self._persist_state(symbol)
+                    log.info("EMERGENCY SL restored: %s @ %.8g", symbol, state.sl_price)
+                return  # Don't proceed with trailing logic until SL is restored
+
         # Throttle: max 1 trailing update per second per symbol
         now = time.monotonic()
         last = self._last_tick_time.get(symbol, 0)
@@ -574,6 +603,16 @@ class ExecutionManager:
                     log.info("Trailing SL moved: %s → %.8g", symbol, new_sl)
                     from dashrock.core.events import TrailingMoved
                     await self._bus.publish(TrailingMoved(symbol=symbol, new_sl=new_sl))
+                else:
+                    # CRITICAL: New SL placement failed (e.g., -2021 would immediately trigger).
+                    # We already cancelled the old SL above, so the position is now UNPROTECTED.
+                    # Fall back to the previous SL price to try again on next tick.
+                    log.warning(
+                        "DANGER: Trailing SL placement failed for %s — position has NO stop loss! "
+                        "Will retry on next tick.",
+                        symbol,
+                    )
+                    state.sl_id = None  # mark as missing so next tick retries
 
     # ─── Helpers ─────────────────────────────────────────
 
