@@ -129,6 +129,9 @@ class DonchianBreakoutStrategy(Strategy):
 
         # Ensure buy stop is ABOVE current price (otherwise it fills immediately
         # as a market order). Use trigger candle's high + offset as minimum.
+        # A minimum buffer of 0.01% prevents Binance -2021 "would immediately trigger"
+        # when offset_pips is 0 or very small.
+        min_buffer_pct = max(cfg.offset_pips if cfg.use_pct_pips else 0.01, 0.01)
         if buy_price <= current_price:
             log.info(
                 "%s: buy_price %.8g <= current_price %.8g, adjusting to candle high + offset",
@@ -136,7 +139,7 @@ class DonchianBreakoutStrategy(Strategy):
             )
             buy_price = trigger.high + offset_buy
             if buy_price <= current_price:
-                buy_price = current_price * (1 + cfg.offset_pips / 100)
+                buy_price = current_price * (1 + min_buffer_pct / 100)
 
         # Ensure sell stop is BELOW current price
         if sell_price >= current_price:
@@ -146,7 +149,7 @@ class DonchianBreakoutStrategy(Strategy):
             )
             sell_price = trigger.low - offset_sell
             if sell_price >= current_price:
-                sell_price = current_price * (1 - cfg.offset_pips / 100)
+                sell_price = current_price * (1 - min_buffer_pct / 100)
 
         buy_stop = OrderIntent(
             symbol=symbol,
