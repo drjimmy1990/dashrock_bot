@@ -600,6 +600,37 @@ class ExecutionManager:
                 if new_sl == state.sl_price:
                     return  # No actual change after rounding
 
+                # ── BREACH CHECK: Is the new SL already past the current price? ──
+                # LONG → SL is SELL STOP → breached if current_price <= new_sl
+                # SHORT → SL is BUY STOP → breached if current_price >= new_sl
+                sl_breached = False
+                if state.position_state == PositionState.LONG and current_price <= new_sl:
+                    sl_breached = True
+                elif state.position_state == PositionState.SHORT and current_price >= new_sl:
+                    sl_breached = True
+
+                if sl_breached:
+                    # Price has already moved past the trailing SL level.
+                    # Do NOT cancel the old SL — close at market immediately.
+                    log.warning(
+                        "TRAILING SL BREACHED: %s new_sl=%.8g but current=%.8g — closing at MARKET",
+                        symbol, new_sl, current_price,
+                    )
+                    sl_side = OrderSide.SELL if state.position_state == PositionState.LONG else OrderSide.BUY
+                    # Cancel the existing SL first (it's wider than new_sl, might not trigger)
+                    if state.sl_id:
+                        await self._safe_cancel(symbol, state.sl_id)
+                        state.sl_id = None
+                    close_order = await self._safe_place_order(OrderIntent(
+                        symbol=symbol, side=sl_side,
+                        order_type=OrderType.MARKET,
+                        stop_price=None, quantity=state.position_qty,
+                        reduce_only=True, tag=f"trailing_breach_close_{int(time.time()*1000)}",
+                    ))
+                    if close_order:
+                        log.info("TRAILING BREACH: Market close sent for %s", symbol)
+                    return
+
                 # CRITICAL: Cancel old SL first. If cancel fails, do NOT place
                 # a new one — that would stack duplicate SL orders on the exchange.
                 if state.sl_id:
@@ -626,15 +657,21 @@ class ExecutionManager:
                     from dashrock.core.events import TrailingMoved
                     await self._bus.publish(TrailingMoved(symbol=symbol, new_sl=new_sl))
                 else:
-                    # CRITICAL: New SL placement failed (e.g., -2021 would immediately trigger).
-                    # We already cancelled the old SL above, so the position is now UNPROTECTED.
-                    # Fall back to the previous SL price to try again on next tick.
+                    # New SL placement failed unexpectedly.
+                    # We already cancelled the old SL, position is unprotected.
                     log.warning(
-                        "DANGER: Trailing SL placement failed for %s — position has NO stop loss! "
-                        "Will retry on next tick.",
+                        "DANGER: Trailing SL placement failed for %s — closing at MARKET as safety.",
                         symbol,
                     )
-                    state.sl_id = None  # mark as missing so next tick retries
+                    close_order = await self._safe_place_order(OrderIntent(
+                        symbol=symbol, side=sl_side,
+                        order_type=OrderType.MARKET,
+                        stop_price=None, quantity=state.position_qty,
+                        reduce_only=True, tag=f"trailing_fail_close_{int(time.time()*1000)}",
+                    ))
+                    if close_order:
+                        log.info("TRAILING FAIL: Market close sent for %s", symbol)
+                    state.sl_id = None
 
     # ─── Helpers ─────────────────────────────────────────
 
