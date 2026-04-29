@@ -348,6 +348,13 @@ class ExecutionManager:
         if sl_order:
             state.sl_id = sl_order.order_id
             state.sl_price = sl_price  # cached — no more API queries!
+        else:
+            # SL placement failed (likely -2021: price already past SL level).
+            # Set sl_price anyway so the emergency handler (on_tick) can detect
+            # the breach and close at market on the next tick.
+            log.warning("Initial SL placement failed for %s — emergency handler will take over", fill.symbol)
+            state.sl_id = None
+            state.sl_price = sl_price
 
         # Place TP
         if self._cfg.stops.tp_pips > 0:
@@ -532,7 +539,7 @@ class ExecutionManager:
 
         # EMERGENCY: If sl_id is None but we have a position, the SL was lost
         # (failed trailing placement). Re-place it immediately, no throttle.
-        if state.sl_id is None and state.sl_price:
+        if state.sl_id is None and state.sl_price is not None:
             lock = self._tick_locks.setdefault(symbol, asyncio.Lock())
             if lock.locked():
                 return
@@ -548,6 +555,21 @@ class ExecutionManager:
                     state.sl_id = sl_order.order_id
                     await self._persist_state(symbol)
                     log.info("EMERGENCY SL restored: %s @ %.8g", symbol, state.sl_price)
+                else:
+                    # SL price is already breached (price moved past it).
+                    # Close position at market immediately — we're beyond our risk limit.
+                    log.warning(
+                        "SL BREACHED: %s SL=%.8g already past current price — closing at MARKET",
+                        symbol, state.sl_price,
+                    )
+                    close_order = await self._safe_place_order(OrderIntent(
+                        symbol=symbol, side=sl_side,
+                        order_type=OrderType.MARKET,
+                        stop_price=None, quantity=state.position_qty,
+                        reduce_only=True, tag=f"sl_breach_close_{int(time.time()*1000)}",
+                    ))
+                    if close_order:
+                        log.info("SL BREACH: Market close sent for %s", symbol)
                 return  # Don't proceed with trailing logic until SL is restored
 
         # Throttle: max 1 trailing update per second per symbol

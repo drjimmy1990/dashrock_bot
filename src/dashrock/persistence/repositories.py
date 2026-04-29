@@ -198,43 +198,39 @@ class Repository:
     # ─── Engine State (Crash Recovery) ───────────────────
 
     async def save_engine_state(self, state: SymbolExecutionState) -> None:
-        """Upsert execution state for a symbol."""
+        """Upsert execution state for a symbol (atomic, no race conditions)."""
+        from dashrock.core.types import PositionState  # avoid circular
+
+        pos_val = state.position_state.value if isinstance(state.position_state, Enum) else state.position_state
+        values = dict(
+            symbol=state.symbol,
+            position_state=pos_val,
+            entry_buy_id=state.entry_buy_id,
+            entry_buy_stop_price=state.entry_buy_stop_price,
+            entry_sell_id=state.entry_sell_id,
+            entry_sell_stop_price=state.entry_sell_stop_price,
+            sl_id=state.sl_id,
+            sl_price=state.sl_price,
+            tp_id=state.tp_id,
+            tp_price=state.tp_price,
+            position_qty=state.position_qty,
+            entry_price=state.entry_price,
+            entry_time_ms=state.entry_time_ms,
+            entry_fee=state.entry_fee,
+            trailing_watermark=state.trailing_watermark,
+            cooldown_remaining=state.cooldown_remaining,
+            pending_reversal_id=state.pending_reversal_id,
+            accumulated_funding=state.accumulated_funding,
+        )
+        # All columns except the PK (symbol) get updated on conflict
+        update_cols = {k: v for k, v in values.items() if k != "symbol"}
+
+        stmt = pg_insert(EngineStateModel).values(**values).on_conflict_do_update(
+            index_elements=["symbol"],
+            set_=update_cols,
+        )
         async with self._db.session() as session:
-            existing = await session.get(EngineStateModel, state.symbol)
-            if existing:
-                for field_name in [
-                    "position_state", "entry_buy_id", "entry_buy_stop_price",
-                    "entry_sell_id", "entry_sell_stop_price",
-                    "sl_id", "sl_price", "tp_id", "tp_price",
-                    "position_qty", "entry_price", "entry_time_ms", "entry_fee",
-                    "trailing_watermark", "cooldown_remaining",
-                    "pending_reversal_id", "accumulated_funding",
-                ]:
-                    val = getattr(state, field_name)
-                    if isinstance(val, Enum):
-                        val = val.value  # enum -> string
-                    setattr(existing, field_name, val)
-            else:
-                session.add(EngineStateModel(
-                    symbol=state.symbol,
-                    position_state=state.position_state.value,
-                    entry_buy_id=state.entry_buy_id,
-                    entry_buy_stop_price=state.entry_buy_stop_price,
-                    entry_sell_id=state.entry_sell_id,
-                    entry_sell_stop_price=state.entry_sell_stop_price,
-                    sl_id=state.sl_id,
-                    sl_price=state.sl_price,
-                    tp_id=state.tp_id,
-                    tp_price=state.tp_price,
-                    position_qty=state.position_qty,
-                    entry_price=state.entry_price,
-                    entry_time_ms=state.entry_time_ms,
-                    entry_fee=state.entry_fee,
-                    trailing_watermark=state.trailing_watermark,
-                    cooldown_remaining=state.cooldown_remaining,
-                    pending_reversal_id=state.pending_reversal_id,
-                    accumulated_funding=state.accumulated_funding,
-                ))
+            await session.execute(stmt)
             await session.commit()
 
     async def load_engine_states(self) -> dict[str, SymbolExecutionState]:

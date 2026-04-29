@@ -38,7 +38,7 @@ equity:
   manual_value: 1000.0
 stops:
   sl_pips: 0.2
-  tp_pips: 0.4
+  tp_pips: 0.0
   use_pct_pips: true
 trailing:
   enabled: true
