@@ -620,6 +620,7 @@ class Application:
         await ws_manager.broadcast_json({"type": "fill", "data": {
             "symbol": e.fill.symbol, "side": e.fill.side.value,
             "price": e.fill.price, "qty": e.fill.quantity,
+            "timestamp_ms": e.fill.timestamp_ms,
         }})
 
     async def _ws_bridge_order_placed(self, e: OrderPlaced) -> None:
@@ -627,26 +628,31 @@ class Application:
             "symbol": e.order.symbol, "side": e.order.side.value,
             "type": e.order.order_type.value, "stop": e.order.stop_price,
             "qty": e.order.quantity,
+            "timestamp_ms": int(time.time() * 1000),
         }})
 
     async def _ws_bridge_order_cancelled(self, e: OrderCancelled) -> None:
         await ws_manager.broadcast_json({"type": "order_cancelled", "data": {
             "symbol": e.symbol, "order_id": e.order_id,
+            "timestamp_ms": int(time.time() * 1000),
         }})
 
     async def _ws_bridge_trailing_moved(self, e) -> None:
         await ws_manager.broadcast_json({"type": "trailing_moved", "data": {
             "symbol": e.symbol, "new_sl": e.new_sl,
+            "timestamp_ms": int(time.time() * 1000),
         }})
 
     async def _ws_bridge_position_opened(self, e: PositionOpened) -> None:
         await ws_manager.broadcast_json({"type": "position_opened", "data": {
             "symbol": e.symbol, "side": e.side, "entry": e.entry_price, "qty": e.quantity,
+            "timestamp_ms": e.timestamp_ms,
         }})
 
     async def _ws_bridge_position_closed(self, e: PositionClosed) -> None:
         await ws_manager.broadcast_json({"type": "position_closed", "data": {
             "symbol": e.symbol, "pnl": e.realized_pnl, "reason": e.exit_reason,
+            "timestamp_ms": e.timestamp_ms,
         }})
 
     async def _ws_bridge_safety(self, e: SafetyTriggered) -> None:

@@ -1,34 +1,96 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useSyncExternalStore } from 'react';
 import { useWsData } from '../context/AppContext';
 
 // Events that are too noisy for the default log view
 const NOISY_TYPES = new Set(['tick', 'candle', 'book_ticker']);
 
+// ─── Module-level log store (survives navigation) ───
+const MAX_LOGS = 500;
+let _logs = [];
+let _listeners = new Set();
+
+function _notify() {
+  _listeners.forEach(fn => fn());
+}
+
+function addLog(entry) {
+  _logs = [entry, ..._logs.slice(0, MAX_LOGS - 1)];
+  _notify();
+}
+
+function clearLogs() {
+  _logs = [];
+  _notify();
+}
+
+function subscribe(listener) {
+  _listeners.add(listener);
+  return () => _listeners.delete(listener);
+}
+
+function getSnapshot() {
+  return _logs;
+}
+
+// Format a timestamp — prefer server time, fallback to browser time
+function formatTime(data) {
+  // Try server timestamp (ms since epoch)
+  const ts = data?.timestamp_ms || data?.ts;
+  if (ts && ts > 1000000000000) {
+    return new Date(ts).toLocaleTimeString();
+  }
+  return new Date().toLocaleTimeString();
+}
+
+// ─── Global WS listener (registered once, never re-registered) ───
+let _wsListenerAttached = false;
+
+function ensureWsListener() {
+  if (_wsListenerAttached) return;
+  _wsListenerAttached = true;
+
+  window.addEventListener('ws_message', (e) => {
+    const msg = e.detail;
+    // Always store non-noisy events; noisy ones are filtered at render time
+    if (NOISY_TYPES.has(msg.type)) return;
+
+    addLog({
+      time: formatTime(msg.data),
+      type: msg.type,
+      data: JSON.stringify(msg.data),
+    });
+  });
+}
+
+// Attach immediately on module load
+ensureWsListener();
+
 export default function LogsPage() {
   const wsData = useWsData();
   const wsStatus = wsData?._wsStatus || 'connecting';
-  const [logs, setLogs] = useState([]);
+  const logs = useSyncExternalStore(subscribe, getSnapshot);
   const [showTicks, setShowTicks] = useState(false);
+
+  // Separate tick listener (only active when showTicks is on)
   const showTicksRef = useRef(showTicks);
   showTicksRef.current = showTicks;
 
-  // Listen to global WS CustomEvents (fired by api.js connectWS)
   useEffect(() => {
-    const handleWs = (e) => {
+    const handleTick = (e) => {
       const msg = e.detail;
-      // Filter out noisy events unless user opts in (use ref for latest value)
-      if (!showTicksRef.current && NOISY_TYPES.has(msg.type)) return;
+      if (!NOISY_TYPES.has(msg.type)) return; // non-noisy handled by global listener
+      if (!showTicksRef.current) return;
 
-      setLogs(prev => [{
-        time: new Date().toLocaleTimeString(),
+      addLog({
+        time: formatTime(msg.data),
         type: msg.type,
         data: JSON.stringify(msg.data),
-      }, ...prev.slice(0, 499)]);
+      });
     };
 
-    window.addEventListener('ws_message', handleWs);
-    return () => window.removeEventListener('ws_message', handleWs);
-  }, []); // Only once — showTicksRef handles the toggle
+    window.addEventListener('ws_message', handleTick);
+    return () => window.removeEventListener('ws_message', handleTick);
+  }, []);
 
   const statusColor = wsStatus === 'connected' ? 'var(--color-green)' :
                        wsStatus === 'auth_failed' ? 'var(--color-red)' : 'var(--color-yellow)';
@@ -52,7 +114,7 @@ export default function LogsPage() {
             className={`btn btn-sm ${showTicks ? 'btn-primary' : 'btn-outline'}`}
             onClick={() => setShowTicks(v => !v)}
           >{showTicks ? '🔊 Ticks ON' : '🔇 Ticks OFF'}</button>
-          <button className="btn btn-outline btn-sm" onClick={() => setLogs([])}>Clear</button>
+          <button className="btn btn-outline btn-sm" onClick={clearLogs}>Clear</button>
         </div>
       </div>
       <div className="page-content">
