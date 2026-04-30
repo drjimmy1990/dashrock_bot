@@ -535,7 +535,11 @@ def create_routes(state: EngineState, auth_enabled: bool = True) -> APIRouter:
     async def get_watchlist() -> dict[str, Any]:
         if state.config is None:
             raise HTTPException(status_code=503, detail="Config not loaded")
-        return {"symbols": state.config.watchlist, "timeframe": state.config.timeframe}
+        return {
+            "symbols": state.config.watchlist,
+            "trade_list": state.config.trade_list,
+            "timeframe": state.config.timeframe,
+        }
 
     # ─── Binance Position Mode ───────────────────────
 

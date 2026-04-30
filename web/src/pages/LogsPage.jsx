@@ -5,9 +5,22 @@ import { useWsData } from '../context/AppContext';
 const NOISY_TYPES = new Set(['tick', 'candle', 'book_ticker']);
 const MAX_LOGS = 500;
 
-// ─── Window-level log store (survives HMR + navigation) ───
+// ─── Window-level log store (survives HMR + navigation + refresh) ───
+const STORAGE_KEY = 'dashrock_logs';
+
+function _loadFromStorage() {
+  try {
+    const raw = sessionStorage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+
+function _saveToStorage(logs) {
+  try { sessionStorage.setItem(STORAGE_KEY, JSON.stringify(logs)); } catch {}
+}
+
 if (!window.__dr_logs) {
-  window.__dr_logs = [];
+  window.__dr_logs = _loadFromStorage();
   window.__dr_listeners = new Set();
   window.__dr_wsAttached = false;
 }
@@ -18,11 +31,13 @@ function _notify() {
 
 function addLog(entry) {
   window.__dr_logs = [entry, ...window.__dr_logs.slice(0, MAX_LOGS - 1)];
+  _saveToStorage(window.__dr_logs);
   _notify();
 }
 
 function clearLogs() {
   window.__dr_logs = [];
+  _saveToStorage(window.__dr_logs);
   _notify();
 }
 
@@ -133,6 +148,7 @@ export default function LogsPage() {
                     l.type === 'order_placed' ? 'badge-blue' :
                     l.type === 'order_cancelled' ? 'badge-yellow' :
                     l.type === 'trailing_moved' ? 'badge-blue' :
+                    l.type === 'native_trailing' ? 'badge-purple' :
                     l.type === 'tick' ? '' : 'badge-blue'
                   }`} style={{ flexShrink: 0 }}>{l.type.replace('_', ' ')}</span>
                   <span style={{ color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{l.data}</span>

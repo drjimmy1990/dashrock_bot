@@ -98,6 +98,14 @@ class TrailingMoved:
 
 
 @dataclass(frozen=True)
+class NativeTrailingPlaced:
+    symbol: str
+    callback_rate: float
+    activate_price: float | None
+    order_id: str
+
+
+@dataclass(frozen=True)
 class FillEvent:
     fill: Fill
 

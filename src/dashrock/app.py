@@ -423,8 +423,9 @@ class Application:
         self.bus.subscribe(SafetyTriggered, self._ws_bridge_safety)
         self.bus.subscribe(EquityUpdate, self._ws_bridge_equity)
         
-        from dashrock.core.events import TrailingMoved
+        from dashrock.core.events import TrailingMoved, NativeTrailingPlaced
         self.bus.subscribe(TrailingMoved, self._ws_bridge_trailing_moved)
+        self.bus.subscribe(NativeTrailingPlaced, self._ws_bridge_native_trailing)
 
     # ─── Main Loop ───────────────────────────────────
 
@@ -581,6 +582,13 @@ class Application:
         if self.manager:
             was_flat = not self.manager.get_state(fill.symbol).has_position
             await self.manager.on_fill(fill)
+
+            # Notify strategy of fills so it can clear fixed levels
+            # (critical for pending_refresh_mode=fixed — without this,
+            # _fixed_levels are never cleared and the strategy reuses stale HH/LL)
+            if self.strategy:
+                self.strategy.on_fill(fill.symbol, fill)
+
         if self.notifier:
             event_type = "trade_opened" if was_flat else "trade_closed"
             await self.notifier.send(
@@ -640,6 +648,15 @@ class Application:
     async def _ws_bridge_trailing_moved(self, e) -> None:
         await ws_manager.broadcast_json({"type": "trailing_moved", "data": {
             "symbol": e.symbol, "new_sl": e.new_sl,
+            "timestamp_ms": int(time.time() * 1000),
+        }})
+
+    async def _ws_bridge_native_trailing(self, e) -> None:
+        await ws_manager.broadcast_json({"type": "native_trailing", "data": {
+            "symbol": e.symbol,
+            "callback_rate": e.callback_rate,
+            "activate_price": e.activate_price,
+            "order_id": e.order_id,
             "timestamp_ms": int(time.time() * 1000),
         }})
 

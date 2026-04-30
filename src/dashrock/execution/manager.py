@@ -297,8 +297,35 @@ class ExecutionManager:
         await self._bus.publish(FillEvent(fill=fill))
 
         if fill.order_id in (state.entry_buy_id, state.entry_sell_id, state.pending_reversal_id) or fill.tag.startswith(("entry_buy_stop", "entry_sell_stop")):
+            # Guard: if position is already open and an opposite entry fills
+            # (race condition — cancel didn't reach Binance in time), treat it
+            # as a conflict. Cancel the stale TSL/SL, close the old position
+            # at market via exit handler, THEN open the new one.
+            if state.has_position:
+                log.warning(
+                    "RACE CONDITION: %s entry fill while already %s — closing old position first",
+                    fill.symbol, state.position_state.value,
+                )
+                # Cancel old SL/TP (including native TSL)
+                for order_id in [state.sl_id, state.tp_id]:
+                    if order_id:
+                        await self._safe_cancel(fill.symbol, order_id)
+                # Force-close the old position via exit handler
+                from dashrock.core.types import Fill as FillType
+                synthetic_exit = Fill(
+                    symbol=fill.symbol,
+                    order_id="race_condition_close",
+                    side=OrderSide.SELL if state.position_state == PositionState.LONG else OrderSide.BUY,
+                    price=fill.price,  # approximate close price
+                    quantity=state.position_qty,
+                    fee=0.0,
+                    timestamp_ms=fill.timestamp_ms,
+                    tag="sl_race_condition",
+                )
+                await self._handle_exit_fill(state, synthetic_exit)
+
             await self._handle_entry_fill(state, fill)
-        elif fill.order_id in (state.sl_id, state.tp_id) or fill.tag.startswith(("sl", "tp", "trailing_sl", "reversal_close_only")):
+        elif fill.order_id in (state.sl_id, state.tp_id) or fill.tag.startswith(("sl", "tp", "trailing_sl", "reversal_close_only", "native_tsl_")):
             await self._handle_exit_fill(state, fill)
         else:
             log.warning("Unknown fill for %s order_id=%s tag=%s", fill.symbol, fill.order_id, fill.tag)
@@ -363,6 +390,13 @@ class ExecutionManager:
                     fill.symbol, callback_rate,
                     f"{activate_price:.8g}" if activate_price else "immediate",
                 )
+                from dashrock.core.events import NativeTrailingPlaced
+                await self._bus.publish(NativeTrailingPlaced(
+                    symbol=fill.symbol,
+                    callback_rate=callback_rate,
+                    activate_price=activate_price,
+                    order_id=sl_order.order_id,
+                ))
             else:
                 # Fallback: place fixed SL if native trailing fails
                 log.warning("Native TSL failed for %s — placing fixed SL fallback", fill.symbol)

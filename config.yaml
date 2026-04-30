@@ -42,10 +42,10 @@ stops:
   use_pct_pips: true
 trailing:
   enabled: true
-  mode: activation_trail
+  mode: binance_native
   step_pips: 0.05
   stop_pips: 0.2
-  activation_pips: 0.3
+  activation_pips: 0.4
   use_pct_pips: true
 reversed_order:
   mode: hedge

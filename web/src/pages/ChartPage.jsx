@@ -11,7 +11,12 @@ export default function ChartPage() {
   const [active, setActive] = useState('');
 
   useEffect(() => {
-    api.watchlist().then(d => { setSymbols(d.symbols || []); setActive(d.symbols?.[0] || ''); }).catch(() => {});
+    api.watchlist().then(d => {
+      setSymbols(d.symbols || []);
+      // Default to first trade_list symbol (has WS candle data), not first watchlist symbol
+      const defaultSym = d.trade_list?.[0] || d.symbols?.[0] || '';
+      setActive(defaultSym);
+    }).catch(() => {});
   }, []);
 
   useEffect(() => {
