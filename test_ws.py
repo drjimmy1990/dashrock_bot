@@ -1,5 +1,5 @@
-"""Quick check: what does Binance testnet ACTUALLY show for XAGUSDT positions + orders?"""
-import asyncio, os, time, hashlib, hmac, urllib.parse, json
+"""Check ALL open orders on Binance (both regular + algo)"""
+import asyncio, os, time, hashlib, hmac, urllib.parse
 import httpx
 
 BASE = "https://testnet.binancefuture.com"
@@ -21,33 +21,38 @@ async def signed_get(client, path, params=None):
     sig = hmac.new(SECRET.encode(), qs.encode(), hashlib.sha256).hexdigest()
     qs += f"&signature={sig}"
     r = await client.get(f"{BASE}{path}?{qs}", headers={"X-MBX-APIKEY": KEY})
-    data = r.json()
-    if isinstance(data, dict) and "code" in data:
-        print(f"  API Error: {data}")
-        return []
-    return data
+    return r.json()
 
 async def main():
     async with httpx.AsyncClient() as c:
+        # Regular open orders
+        reg = await signed_get(c, "/fapi/v1/openOrders", {"symbol": "XAGUSDT"})
+        print(f"=== REGULAR OPEN ORDERS ({len(reg) if isinstance(reg, list) else 'ERR'}) ===")
+        if isinstance(reg, list):
+            for o in reg:
+                print(f"  {o['type']} {o['side']} qty={o['origQty']} stop={o.get('stopPrice')} id={o['orderId']}")
+        else:
+            print(f"  {reg}")
+
+        # Algo open orders
+        algo = await signed_get(c, "/fapi/v1/openAlgoOrders", {"symbol": "XAGUSDT"})
+        algo_orders = algo.get("orders", algo) if isinstance(algo, dict) else algo
+        print(f"\n=== ALGO OPEN ORDERS ({len(algo_orders) if isinstance(algo_orders, list) else 'ERR'}) ===")
+        if isinstance(algo_orders, list):
+            for o in algo_orders:
+                print(f"  {o.get('type','?')} {o.get('side','?')} qty={o.get('origQty','?')} "
+                      f"stop={o.get('triggerPrice','?')} callback={o.get('callbackRate','?')} "
+                      f"activate={o.get('activatePrice','?')} id={o.get('algoId', o.get('orderId','?'))}")
+        else:
+            print(f"  {algo_orders}")
+
+        # Position check
         positions = await signed_get(c, "/fapi/v2/positionRisk", {"symbol": "XAGUSDT"})
-        print("=== POSITIONS ===")
+        print(f"\n=== POSITION ===")
         for p in positions:
             if isinstance(p, dict):
                 qty = float(p.get("positionAmt", 0))
                 if qty != 0:
-                    print(f"  Side={'LONG' if qty > 0 else 'SHORT'} qty={abs(qty)} entry={p['entryPrice']} pnl={p['unRealizedProfit']} positionSide={p.get('positionSide')}")
-                else:
-                    print(f"  {p.get('positionSide', '?')}: FLAT")
-
-        orders = await signed_get(c, "/fapi/v1/openOrders", {"symbol": "XAGUSDT"})
-        print(f"\n=== OPEN ORDERS ({len(orders)}) ===")
-        for o in orders:
-            if isinstance(o, dict):
-                ts = int(o.get("time", 0))
-                dt = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(ts/1000)) if ts else "?"
-                print(f"  [{dt}] {o['type']} {o['side']} positionSide={o.get('positionSide')} "
-                      f"qty={o['origQty']} stop={o.get('stopPrice')} "
-                      f"callback={o.get('callbackRate')} activate={o.get('activatePrice')} "
-                      f"id={o['orderId']}")
+                    print(f"  {'LONG' if qty > 0 else 'SHORT'} qty={abs(qty)} entry={p['entryPrice']}")
 
 asyncio.run(main())

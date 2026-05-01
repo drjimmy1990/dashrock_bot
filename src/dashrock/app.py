@@ -31,7 +31,7 @@ from dashrock.core.events import (
     SafetyTriggered, TickUpdate,
 )
 from dashrock.core.state_machine import EngineStateMachine, EngineStatus
-from dashrock.core.types import BookTop, Candle, OrderSide, OrderType, PositionState
+from dashrock.core.types import BookTop, Candle, OrderIntent, OrderSide, OrderType, PositionState
 from dashrock.execution.manager import ExecutionManager
 from dashrock.market.binance_ws import create_binance_ws_factory
 from dashrock.market.data_service import MarketDataService
@@ -364,9 +364,44 @@ class Application:
                         local_state.sl_id = None
                         local_state.sl_price = None
 
+                    # In binance_native mode: ensure emergency SL exists alongside TSL
+                    if (self.cfg.trailing.enabled
+                            and self.cfg.trailing.mode == "binance_native"
+                            and local_state.tsl_id
+                            and not local_state.sl_id):
+                        log.warning(
+                            "RECONCILE: %s has TSL but NO emergency SL — placing one now",
+                            sym,
+                        )
+                        sl_side = (OrderSide.SELL
+                                   if local_state.position_state == PositionState.LONG
+                                   else OrderSide.BUY)
+                        sl_price = self.manager._calculate_sl_price(OrderIntent(
+                            symbol=sym, side=local_state.position_side,
+                            order_type=OrderType.STOP_MARKET,
+                            stop_price=local_state.entry_price, quantity=0,
+                        ))
+                        sl_price = self.manager._registry.round_price(sym, sl_price)
+                        sl_order = await self.manager._safe_place_order(OrderIntent(
+                            symbol=sym, side=sl_side,
+                            order_type=OrderType.STOP_MARKET,
+                            stop_price=sl_price,
+                            quantity=local_state.position_qty,
+                            reduce_only=True,
+                            tag=f"sl_emergency_{int(time.time()*1000)}",
+                        ))
+                        if sl_order:
+                            local_state.sl_id = sl_order.order_id
+                            local_state.sl_price = sl_price
+                            log.info(
+                                "RECONCILE: Emergency SL placed for %s @ %.8g",
+                                sym, sl_price,
+                            )
+
                     log.info(
-                        "RECONCILE: %s state consistent — %s qty=%.8g",
+                        "RECONCILE: %s state consistent — %s qty=%.8g sl=%s tsl=%s",
                         sym, local_state.position_state.value, local_state.position_qty,
+                        local_state.sl_id or "NONE", local_state.tsl_id or "NONE",
                     )
 
                 else:
