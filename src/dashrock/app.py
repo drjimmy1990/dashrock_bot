@@ -364,13 +364,13 @@ class Application:
                         local_state.sl_id = None
                         local_state.sl_price = None
 
-                    # In binance_native mode: ensure emergency SL exists alongside TSL
+                    # In binance_native mode: ensure emergency SL exists on exchange
                     if (self.cfg.trailing.enabled
                             and self.cfg.trailing.mode == "binance_native"
-                            and local_state.tsl_id
-                            and not local_state.sl_id):
+                            and local_state.has_position
+                            and not sl_exists):
                         log.warning(
-                            "RECONCILE: %s has TSL but NO emergency SL — placing one now",
+                            "RECONCILE: %s has position but NO emergency SL on exchange — placing one now",
                             sym,
                         )
                         sl_side = (OrderSide.SELL
@@ -397,6 +397,47 @@ class Application:
                                 "RECONCILE: Emergency SL placed for %s @ %.8g",
                                 sym, sl_price,
                             )
+                        else:
+                            log.error("RECONCILE: Failed to place emergency SL for %s!", sym)
+
+                    # Check if TSL is also missing and re-place it
+                    tsl_exists = any(
+                        o.order_id == local_state.tsl_id for o in exchange_orders
+                    ) if local_state.tsl_id else False
+                    if (self.cfg.trailing.enabled
+                            and self.cfg.trailing.mode == "binance_native"
+                            and local_state.has_position
+                            and not tsl_exists):
+                        log.warning(
+                            "RECONCILE: %s has position but NO TSL on exchange — placing one now",
+                            sym,
+                        )
+                        from dashrock.core.events import NativeTrailingPlaced
+                        tsl_side = (OrderSide.SELL
+                                    if local_state.position_state == PositionState.LONG
+                                    else OrderSide.BUY)
+                        callback_rate = self.cfg.trailing.stop_pips
+                        activate_price = None
+                        if self.cfg.trailing.activation_pips > 0:
+                            if local_state.position_state == PositionState.LONG:
+                                activate_price = local_state.entry_price * (1 + self.cfg.trailing.activation_pips / 100.0)
+                            else:
+                                activate_price = local_state.entry_price * (1 - self.cfg.trailing.activation_pips / 100.0)
+                            activate_price = self.manager._registry.round_price(sym, activate_price)
+
+                        tsl_order = await self.manager._safe_place_order(OrderIntent(
+                            symbol=sym, side=tsl_side,
+                            order_type=OrderType.TRAILING_STOP_MARKET,
+                            stop_price=None,
+                            quantity=local_state.position_qty,
+                            reduce_only=True,
+                            callback_rate=callback_rate,
+                            activate_price=activate_price,
+                            tag=f"native_tsl_{int(time.time()*1000)}",
+                        ))
+                        if tsl_order:
+                            local_state.tsl_id = tsl_order.order_id
+                            log.info("RECONCILE: TSL re-placed for %s", sym)
 
                     log.info(
                         "RECONCILE: %s state consistent — %s qty=%.8g sl=%s tsl=%s",

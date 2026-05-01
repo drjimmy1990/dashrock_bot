@@ -394,12 +394,24 @@ class ExecutionManager:
                 stop_price=fill.price, quantity=0,
             ))
             emergency_sl_price = self._registry.round_price(fill.symbol, emergency_sl_price)
-            emergency_sl = await self._safe_place_order(OrderIntent(
-                symbol=fill.symbol, side=sl_side,
-                order_type=OrderType.STOP_MARKET,
-                stop_price=emergency_sl_price, quantity=fill.quantity,
-                reduce_only=True, tag=f"sl_emergency_{int(time.time()*1000)}",
-            ))
+
+            # Retry up to 3 times — testnet can intermittently reject orders
+            emergency_sl = None
+            for attempt in range(1, 4):
+                emergency_sl = await self._safe_place_order(OrderIntent(
+                    symbol=fill.symbol, side=sl_side,
+                    order_type=OrderType.STOP_MARKET,
+                    stop_price=emergency_sl_price, quantity=fill.quantity,
+                    reduce_only=True, tag=f"sl_emergency_{int(time.time()*1000)}",
+                ))
+                if emergency_sl:
+                    break
+                log.warning(
+                    "EMERGENCY SL attempt %d/3 failed for %s — retrying in 500ms",
+                    attempt, fill.symbol,
+                )
+                await asyncio.sleep(0.5)
+
             if emergency_sl:
                 state.sl_id = emergency_sl.order_id
                 state.sl_price = emergency_sl_price
@@ -408,8 +420,11 @@ class ExecutionManager:
                     fill.symbol, emergency_sl_price, self._cfg.stops.sl_pips,
                 )
             else:
-                log.warning("EMERGENCY SL placement failed for %s!", fill.symbol)
-                state.sl_price = emergency_sl_price
+                log.error(
+                    "CRITICAL: EMERGENCY SL failed after 3 attempts for %s! Position unprotected!",
+                    fill.symbol,
+                )
+                state.sl_price = emergency_sl_price  # set so reconciliation can fix it
 
             # 2. Place native trailing stop (for profit protection once activated)
             activate_price = None
