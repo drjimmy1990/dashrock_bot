@@ -333,6 +333,9 @@ def create_routes(state: EngineState, auth_enabled: bool = True) -> APIRouter:
         for symbol in state.config.trade_list:
             if state.manager:
                 await state.manager.clear_state(symbol)
+            # Clear strategy fixed levels so resume computes fresh HH/LL
+            if state.strategy:
+                state.strategy.clear_state(symbol)
             orders = await state.adapter.get_open_orders(symbol)
             for o in orders:
                 await state.adapter.cancel_order(symbol, o.order_id)
@@ -497,7 +500,11 @@ def create_routes(state: EngineState, auth_enabled: bool = True) -> APIRouter:
             if s.entry_sell_stop_price:
                 levels.append({"price": s.entry_sell_stop_price, "color": "#ef4444", "title": "Sell Stop", "style": 2})
             if s.sl_price:
-                levels.append({"price": s.sl_price, "color": "#f59e0b", "title": "Stop Loss", "style": 1})
+                # Label differently for native trailing mode
+                is_native = (state.config and state.config.trailing.enabled
+                             and state.config.trailing.mode == "binance_native")
+                sl_label = "Trail SL" if is_native else "Stop Loss"
+                levels.append({"price": s.sl_price, "color": "#f59e0b", "title": sl_label, "style": 1})
             if s.tp_price:
                 levels.append({"price": s.tp_price, "color": "#3b82f6", "title": "Take Profit", "style": 1})
             if s.entry_price:

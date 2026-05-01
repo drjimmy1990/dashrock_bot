@@ -143,7 +143,7 @@ class Application:
             bus=self.bus,
             symbols=self.cfg.trade_list,
             timeframes=[self.cfg.timeframe],
-            ws_factory=create_binance_ws_factory(self.cfg.timeframe),
+            ws_factory=create_binance_ws_factory(self.cfg.timeframe, mode=self.cfg.mode),
             window_size=200,
         )
 
@@ -305,9 +305,11 @@ class Application:
                     local_state.entry_time_ms = exchange_pos.opened_at_ms
                     local_state.trailing_watermark = exchange_pos.entry_price
 
-                    # Check if SL/TP orders exist on exchange
+                    # Check if SL/TP/TSL orders exist on exchange
                     for order in exchange_orders:
-                        if order.tag in ("sl", "trailing_sl") or order.order_type == OrderType.STOP_MARKET:
+                        if order.order_type == OrderType.TRAILING_STOP_MARKET:
+                            local_state.tsl_id = order.order_id
+                        elif order.tag in ("sl", "trailing_sl") or order.order_type == OrderType.STOP_MARKET:
                             local_state.sl_id = order.order_id
                             local_state.sl_price = order.stop_price
                         elif order.tag == "tp" or order.order_type == OrderType.TAKE_PROFIT_MARKET:
@@ -495,20 +497,34 @@ class Application:
     # ─── Event Handlers ──────────────────────────────
 
     async def _on_candle_closed(self, event: CandleClosed) -> None:
+        candle = event.candle
+        symbol = candle.symbol
+
         if not self.sm.is_trading_allowed:
+            log.debug("Candle closed %s — trading not allowed (state=%s)", symbol, self.sm.status.value)
             return
         assert self.cfg and self.strategy and self.manager and self.adapter and self.md
 
-        candle = event.candle
-        symbol = candle.symbol
         if symbol not in self.cfg.trade_list:
             return
 
-        # Safety check
-        equity = await self.adapter.get_equity_usd()
-        daily_pnl = await self.repo.get_todays_realized_pnl() if self.repo else 0
-        hw = await self.repo.get_equity_high_water() if self.repo else equity
-        losses = await self.repo.get_consecutive_losses() if self.repo else 0
+        log.debug("CANDLE CLOSED: %s O=%.4f H=%.4f L=%.4f C=%.4f", symbol, candle.open, candle.high, candle.low, candle.close)
+
+        # Safety check — wrap DB calls so they can't kill the handler
+        try:
+            equity = await self.adapter.get_equity_usd()
+        except Exception:
+            log.warning("Failed to fetch equity for %s — using 0", symbol, exc_info=True)
+            equity = 0.0
+
+        try:
+            daily_pnl = await self.repo.get_todays_realized_pnl() if self.repo else 0
+            hw = await self.repo.get_equity_high_water() if self.repo else equity
+            losses = await self.repo.get_consecutive_losses() if self.repo else 0
+        except Exception:
+            log.warning("Failed to fetch safety metrics — skipping safety check", exc_info=True)
+            daily_pnl, hw, losses = 0, equity, 0
+
         safety = self.safety.check(
             daily_pnl=daily_pnl, starting_equity=self.cfg.simulator.starting_equity_usd,
             current_equity=equity, high_water_equity=hw, consecutive_losses=losses,
@@ -551,8 +567,11 @@ class Application:
         await self.manager.apply_desired(desired, equity=equity, blackout=blackout)
 
         # Equity snapshot
-        if self.repo:
-            await self.repo.insert_equity_snapshot(equity)
+        try:
+            if self.repo:
+                await self.repo.insert_equity_snapshot(equity)
+        except Exception:
+            log.warning("Failed to persist equity snapshot", exc_info=True)
         await self.bus.publish(EquityUpdate(equity_usd=equity, timestamp_ms=int(time.time() * 1000)))
 
     async def _on_tick_update(self, event: TickUpdate) -> None:

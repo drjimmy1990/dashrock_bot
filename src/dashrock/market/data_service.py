@@ -204,11 +204,11 @@ class MarketDataService:
         data = msg.get("data", msg)
         etype = data.get("e")
 
-        # Debug: log kline events (infrequent) to verify stream health
+        # Debug: log first kline + periodic health check
         if etype == "kline":
             self._kline_count[symbol] = self._kline_count.get(symbol, 0) + 1
             kc = self._kline_count[symbol]
-            if kc <= 3 or kc % 50 == 0:
+            if kc == 1 or kc % 500 == 0:
                 k = data.get("k", {})
                 log.info("KLINE %s #%d: close=%s x=%s", symbol, kc, k.get("c"), k.get("x"))
 

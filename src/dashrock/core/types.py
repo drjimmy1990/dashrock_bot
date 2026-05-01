@@ -194,6 +194,7 @@ class SymbolExecutionState:
     entry_sell_stop_price: float | None = None
     sl_id: str | None = None
     sl_price: float | None = None  # cached — no more N+1 queries!
+    tsl_id: str | None = None  # native trailing stop order (separate from emergency SL)
     tp_id: str | None = None
     tp_price: float | None = None  # cached
     position_qty: float = 0.0

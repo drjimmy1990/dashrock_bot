@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useSyncExternalStore } from 'react';
 import { useWsData } from '../context/AppContext';
 
 // Events that are too noisy for the default log view
-const NOISY_TYPES = new Set(['tick', 'candle', 'book_ticker']);
+const NOISY_TYPES = new Set(['tick', 'candle', 'book_ticker', 'equity']);
 const MAX_LOGS = 500;
 
 // ─── Window-level log store (survives HMR + navigation + refresh) ───

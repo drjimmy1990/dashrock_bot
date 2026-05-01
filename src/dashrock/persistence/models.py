@@ -92,6 +92,7 @@ class EngineStateModel(Base):
     entry_sell_stop_price = Column(Float, nullable=True)
     sl_id = Column(String(50), nullable=True)
     sl_price = Column(Float, nullable=True)
+    tsl_id = Column(String(50), nullable=True)
     tp_id = Column(String(50), nullable=True)
     tp_price = Column(Float, nullable=True)
     position_qty = Column(Float, default=0.0)

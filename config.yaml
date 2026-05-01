@@ -48,7 +48,7 @@ trailing:
   activation_pips: 0.4
   use_pct_pips: true
 reversed_order:
-  mode: hedge
+  mode: cancel
 time_filter:
   enabled: false
   timezone: UTC
