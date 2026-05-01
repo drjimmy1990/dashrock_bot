@@ -495,21 +495,32 @@ def create_routes(state: EngineState, auth_enabled: bool = True) -> APIRouter:
         levels = []
         if state.manager:
             s = state.manager.get_state(sym)
+            is_native = (state.config and state.config.trailing.enabled
+                         and state.config.trailing.mode == "binance_native")
             if s.entry_buy_stop_price:
                 levels.append({"price": s.entry_buy_stop_price, "color": "#10b981", "title": "Buy Stop", "style": 2})
             if s.entry_sell_stop_price:
                 levels.append({"price": s.entry_sell_stop_price, "color": "#ef4444", "title": "Sell Stop", "style": 2})
             if s.sl_price:
-                # Label differently for native trailing mode
-                is_native = (state.config and state.config.trailing.enabled
-                             and state.config.trailing.mode == "binance_native")
-                sl_label = "Trail SL" if is_native else "Stop Loss"
+                sl_label = "Emergency SL" if is_native else "Stop Loss"
                 levels.append({"price": s.sl_price, "color": "#f59e0b", "title": sl_label, "style": 1})
             if s.tp_price:
                 levels.append({"price": s.tp_price, "color": "#3b82f6", "title": "Take Profit", "style": 1})
             if s.entry_price:
                 levels.append({"price": s.entry_price, "color": "#8b5cf6", "title": "Entry", "style": 0})
-            if s.trailing_watermark:
+            # In binance_native mode, trailing watermark is managed by Binance (stale locally)
+            # Show activation price instead
+            if is_native and s.has_position and s.tsl_id:
+                # Calculate activation price the same way as entry fill
+                from dashrock.core.types import PositionState
+                act_pct = state.config.trailing.activation_pips / 100
+                if s.position_state == PositionState.LONG:
+                    act_price = s.entry_price * (1 + act_pct)
+                else:
+                    act_price = s.entry_price * (1 - act_pct)
+                act_price = state.manager._registry.round_price(sym, act_price)
+                levels.append({"price": act_price, "color": "#ec4899", "title": "TSL Activate", "style": 2})
+            elif not is_native and s.trailing_watermark:
                 levels.append({"price": s.trailing_watermark, "color": "#ec4899", "title": "Trail HW", "style": 2})
         return {"symbol": sym, "levels": levels}
 

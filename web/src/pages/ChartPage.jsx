@@ -139,10 +139,10 @@ export default function ChartPage() {
         <div style={{ display: 'flex', gap: 16, marginTop: 12, flexWrap: 'wrap', fontSize: '0.8rem' }}>
           <span style={{ color: '#10b981' }}>━━ Buy Stop</span>
           <span style={{ color: '#ef4444' }}>━━ Sell Stop</span>
-          <span style={{ color: '#f59e0b' }}>┈┈ Stop Loss</span>
+          <span style={{ color: '#f59e0b' }}>┈┈ Stop Loss / Emergency SL</span>
           <span style={{ color: '#3b82f6' }}>┈┈ Take Profit</span>
           <span style={{ color: '#8b5cf6' }}>── Entry</span>
-          <span style={{ color: '#ec4899' }}>━━ Trailing HW</span>
+          <span style={{ color: '#ec4899' }}>━━ TSL Activate / Trail HW</span>
         </div>
       </div>
     </>
