@@ -11,7 +11,7 @@ timeframe: 1m
 strategy:
   name: donchian_breakout
   lookback_candles: 2
-  offset_pips: 0.0
+  offset_pips: 0.05
   pending_refresh_mode: fixed
   cooldown_candles: 1
   cooldown_trigger: any_close
