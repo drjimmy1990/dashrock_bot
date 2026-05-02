@@ -249,7 +249,25 @@ class ExecutionManager:
             reduce_only=intent.reduce_only,
             tag=intent.tag,
         )
-        order = await self._safe_place_order(sized_intent)
+        try:
+            order = await self._adapter.place_order(sized_intent)
+            await self._bus.publish(OrderPlaced(order=order))
+        except ExchangeError as e:
+            if e.code == -2021:
+                # Price blew past the entry stop before the order landed.
+                # This is a fast-market skip, not an error — the opposite
+                # direction entry order will still be placed normally.
+                log.info(
+                    "MISSED BREAKOUT: %s %s entry @ %.8g — price already moved past "
+                    "stop (fast market). Skipping this direction.",
+                    side_label.upper(), state.symbol, price,
+                )
+            else:
+                log.error("Failed to place order for %s: %s", state.symbol, e)
+            return
+        except Exception as e:
+            log.error("Failed to place order for %s: %s", state.symbol, e)
+            return
         if not order:
             return
 
