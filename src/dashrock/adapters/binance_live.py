@@ -99,6 +99,10 @@ class BinanceLiveAdapter(ExecutionAdapter):
         # Position mode: True = hedge (dual side), False = one-way
         self._hedge_mode: bool = False
 
+        # Clock offset vs Binance server time (ms). Applied to every signed
+        # request so VPS clock drift never causes -1021 errors.
+        self._time_offset_ms: int = 0
+
     # ─── Lifecycle ───────────────────────────────────────────
 
     async def start(self) -> None:
@@ -112,6 +116,9 @@ class BinanceLiveAdapter(ExecutionAdapter):
             "Binance adapter started — base=%s mode=%s",
             self._base_url, self._cfg.mode,
         )
+
+        # Sync clock with Binance server time to prevent -1021 errors
+        await self._sync_server_time()
 
         # Start UserData stream for fill notifications
         await self._start_user_data_stream()
@@ -143,13 +150,42 @@ class BinanceLiveAdapter(ExecutionAdapter):
     # ─── Request Signing ─────────────────────────────────────
 
     def _sign(self, params: dict[str, Any]) -> dict[str, Any]:
-        """Add timestamp + HMAC-SHA256 signature to request params."""
-        params["timestamp"] = int(time.time() * 1000)
+        """Add timestamp + HMAC-SHA256 signature to request params.
+
+        Uses Binance-corrected timestamp (local time + measured offset)
+        so VPS clock drift never causes -1021 errors.
+        """
+        params["timestamp"] = int(time.time() * 1000) + self._time_offset_ms
         params["recvWindow"] = self._cfg.live.recv_window_ms
         query = urlencode(params)
         sig = hmac.new(self._api_secret, query.encode(), hashlib.sha256).hexdigest()
         params["signature"] = sig
         return params
+
+    async def _sync_server_time(self) -> None:
+        """Fetch Binance server time and compute clock offset.
+
+        Eliminates -1021 'Timestamp outside recvWindow' errors caused by
+        VPS clock drift. Measures round-trip time to correct for latency.
+        """
+        assert self._client is not None
+        try:
+            t0 = time.time()
+            resp = await self._client.get("/fapi/v1/time")
+            t1 = time.time()
+            server_time_ms = resp.json()["serverTime"]
+            # Estimate server time at moment of request (mid-point of round trip)
+            local_time_ms = int((t0 + t1) / 2 * 1000)
+            self._time_offset_ms = server_time_ms - local_time_ms
+            log.info(
+                "Binance clock sync: offset=%+dms (VPS is %s by %dms)",
+                self._time_offset_ms,
+                "behind" if self._time_offset_ms > 0 else "ahead",
+                abs(self._time_offset_ms),
+            )
+        except Exception:
+            log.warning("Failed to sync Binance server time — using local clock", exc_info=True)
+            self._time_offset_ms = 0
 
     async def _request(
         self,
@@ -578,9 +614,10 @@ class BinanceLiveAdapter(ExecutionAdapter):
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, 60)
 
-                # Refresh listen key on reconnect
+                # Refresh listen key and re-sync clock on reconnect
                 try:
                     assert self._client is not None
+                    await self._sync_server_time()
                     resp = await self._client.post("/fapi/v1/listenKey")
                     data = resp.json()
                     self._listen_key = data["listenKey"]

@@ -110,7 +110,7 @@ live:
   auto_set_leverage: true
   auto_set_margin_type: false
   margin_type: CROSSED
-  recv_window_ms: 5000
+  recv_window_ms: 10000
   listen_key_refresh_sec: 1800
   startup_reconcile: true
   max_retries: 3
