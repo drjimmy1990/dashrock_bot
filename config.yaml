@@ -26,18 +26,18 @@ strategy:
   params: {}
 sizing:
   mode: equity_fraction
-  risk_per_trade_pct: 0.1
-  fallback_fixed_usd: 50.0
-  leverage: 20
+  risk_per_trade_pct: 0.2
+  fallback_fixed_usd: 10.0
+  leverage: 100
 portfolio_risk:
   max_open_positions: 3
   max_total_exposure_pct: 300.0
   max_per_symbol_exposure_pct: 100.0
 equity:
-  source: manual
-  manual_value: 1000.0
+  source: auto
+  manual_value: 50.0
 stops:
-  sl_pips: 0.25
+  sl_pips: 0.2
   tp_pips: 0.0
   use_pct_pips: true
 trailing:
@@ -45,7 +45,7 @@ trailing:
   mode: binance_native
   step_pips: 0.05
   stop_pips: 0.2
-  activation_pips: 0.4
+  activation_pips: 0.3
   use_pct_pips: true
 reversed_order:
   mode: cancel

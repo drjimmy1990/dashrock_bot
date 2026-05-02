@@ -136,8 +136,10 @@ async def test_fill_parsing(adapter):
             "s": "ETHUSDT",  # symbol
             "S": "SELL",  # side
             "ap": "2500.50",  # average price
+            "z": "0.5",  # cumulative filled qty
             "l": "0.5",  # last filled qty
             "n": "0.05",  # commission
+            "c": "test_tag",  # clientOrderId
             "X": "FILLED",  # status
         },
     }

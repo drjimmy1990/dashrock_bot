@@ -293,11 +293,70 @@ class ExecutionManager:
     # ─── Fill Handling ───────────────────────────────────
 
     async def on_fill(self, fill: Fill) -> None:
-        """Route a fill to the correct handler (entry or exit)."""
+        """Route a fill to the correct handler (entry or exit).
+
+        Fill matching strategy (in order):
+        1. Match by order_id against stored entry/SL/TP/TSL IDs
+        2. Match by tag prefix (e.g., "entry_buy_stop", "sl_emergency_")
+        3. FALLBACK: Context-based matching by position state + fill side
+           (critical for LIVE Binance where algo orders create child orders
+            with different IDs that don't match stored algoId)
+        """
         state = self.get_state(fill.symbol)
         await self._bus.publish(FillEvent(fill=fill))
 
-        if fill.order_id in (state.entry_buy_id, state.entry_sell_id, state.pending_reversal_id) or fill.tag.startswith(("entry_buy_stop", "entry_sell_stop")):
+        # ── Strategy 1 & 2: Match by order_id or tag ──
+        is_entry_by_id = fill.order_id in (
+            state.entry_buy_id, state.entry_sell_id, state.pending_reversal_id,
+        )
+        is_entry_by_tag = fill.tag.startswith(("entry_buy_stop", "entry_sell_stop"))
+
+        is_exit_by_id = fill.order_id in (state.sl_id, state.tsl_id, state.tp_id)
+        is_exit_by_tag = fill.tag.startswith((
+            "sl", "tp", "trailing_sl", "reversal_close_only", "native_tsl_",
+        ))
+
+        # ── Strategy 3: Context-based fallback (for live algo child orders) ──
+        is_entry_by_context = False
+        is_exit_by_context = False
+
+        if not (is_entry_by_id or is_entry_by_tag or is_exit_by_id or is_exit_by_tag):
+            # No ID/tag match — try context-based inference
+            if not state.has_position:
+                # Symbol is FLAT: check if fill side matches a pending entry
+                if fill.side == OrderSide.BUY and state.entry_buy_id:
+                    is_entry_by_context = True
+                    log.info(
+                        "CONTEXT MATCH: %s BUY fill (id=%s) → entry (pending buy_id=%s)",
+                        fill.symbol, fill.order_id, state.entry_buy_id,
+                    )
+                elif fill.side == OrderSide.SELL and state.entry_sell_id:
+                    is_entry_by_context = True
+                    log.info(
+                        "CONTEXT MATCH: %s SELL fill (id=%s) → entry (pending sell_id=%s)",
+                        fill.symbol, fill.order_id, state.entry_sell_id,
+                    )
+            else:
+                # Symbol HAS a position: check if fill is on the closing side
+                exit_side = (
+                    OrderSide.SELL if state.position_state == PositionState.LONG
+                    else OrderSide.BUY
+                )
+                if fill.side == exit_side:
+                    is_exit_by_context = True
+                    # Determine exit reason from remaining orders
+                    exit_reason = "unknown"
+                    if state.sl_id:
+                        exit_reason = "sl/tsl"
+                    if state.tsl_id:
+                        exit_reason = "tsl"
+                    log.info(
+                        "CONTEXT MATCH: %s %s fill (id=%s) → exit (%s)",
+                        fill.symbol, fill.side.value, fill.order_id, exit_reason,
+                    )
+
+        # ── Route to handler ──
+        if is_entry_by_id or is_entry_by_tag or is_entry_by_context:
             # Guard: if position is already open and an opposite entry fills
             # (race condition — cancel didn't reach Binance in time), treat it
             # as a conflict. Cancel the stale TSL/SL, close the old position
@@ -348,7 +407,7 @@ class ExecutionManager:
                 await self._handle_exit_fill(state, synthetic_exit)
 
             await self._handle_entry_fill(state, fill)
-        elif fill.order_id in (state.sl_id, state.tsl_id, state.tp_id) or fill.tag.startswith(("sl", "tp", "trailing_sl", "reversal_close_only", "native_tsl_")):
+        elif is_exit_by_id or is_exit_by_tag or is_exit_by_context:
             await self._handle_exit_fill(state, fill)
         else:
             log.warning("Unknown fill for %s order_id=%s tag=%s", fill.symbol, fill.order_id, fill.tag)

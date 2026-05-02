@@ -534,7 +534,12 @@ class BinanceLiveAdapter(ExecutionAdapter):
         backoff = 1
         while True:
             try:
-                url = f"{self._ws_url}/ws/{self._listen_key}"
+                # On live Binance, UserData must use /private route
+                # to receive ALGO_UPDATE and private ORDER_TRADE_UPDATE events.
+                # Testnet doesn't require routing (no /private path needed).
+                is_live = "fstream.binance.com" in self._ws_url and "testnet" not in self._ws_url
+                route = "/private" if is_live else ""
+                url = f"{self._ws_url}{route}/ws/{self._listen_key}"
                 async with websockets.connect(
                     url, ping_interval=30, ping_timeout=20, open_timeout=30,
                 ) as ws:
@@ -550,11 +555,15 @@ class BinanceLiveAdapter(ExecutionAdapter):
 
                             if event_type == "ORDER_TRADE_UPDATE":
                                 await self._handle_order_update(msg)
+                            elif event_type == "ALGO_UPDATE":
+                                await self._handle_algo_update(msg)
                             elif event_type == "ACCOUNT_UPDATE":
                                 log.debug("Account update: %s", msg)
                             elif event_type == "listenKeyExpired":
                                 log.warning("Listen key expired, reconnecting...")
                                 break  # Will reconnect
+                            else:
+                                log.debug("UserData event: %s", event_type)
                         except Exception:
                             log.warning("Error processing UserData message", exc_info=True)
 
@@ -616,7 +625,7 @@ class BinanceLiveAdapter(ExecutionAdapter):
             return
 
         fill = Fill(
-            order_id=str(order_data["i"]),  # orderId
+            order_id=str(order_data["i"]),  # orderId (child order on live)
             symbol=order_data["s"],  # symbol
             side=OrderSide(order_data["S"]),  # side
             price=float(order_data["ap"]),  # average price (VWAP across all partials)
@@ -627,9 +636,9 @@ class BinanceLiveAdapter(ExecutionAdapter):
         )
 
         log.info(
-            "BINANCE FILL: %s %s @ %.8g qty=%.8g fee=%.6f (order %s)",
+            "BINANCE FILL: %s %s @ %.8g qty=%.8g fee=%.6f (order %s tag=%s)",
             fill.symbol, fill.side.value, fill.price,
-            fill.quantity, fill.fee, fill.order_id,
+            fill.quantity, fill.fee, fill.order_id, fill.tag,
         )
 
         if self._fill_handler:
@@ -637,6 +646,37 @@ class BinanceLiveAdapter(ExecutionAdapter):
                 await self._fill_handler(fill)
             except Exception:
                 log.error("Error in fill handler", exc_info=True)
+
+    async def _handle_algo_update(self, msg: dict) -> None:
+        """Handle ALGO_UPDATE events from live Binance.
+
+        On live Binance, conditional orders (STOP_MARKET, TRAILING_STOP_MARKET)
+        emit ALGO_UPDATE when triggered, NOT ORDER_TRADE_UPDATE.
+        When status is TRIGGERED, we know the algo order fired.
+        The child order fill will arrive via ORDER_TRADE_UPDATE with a different
+        orderId — our context-based fill matching in the manager handles this.
+
+        We log ALGO_UPDATE events for debugging. If the algo is TRIGGERED,
+        the follow-up ORDER_TRADE_UPDATE with FILLED status will be handled
+        by _handle_order_update + context matching in the execution manager.
+        """
+        algo_data = msg.get("o", {})
+        algo_id = algo_data.get("ai", algo_data.get("algoId", "?"))
+        algo_status = algo_data.get("as", algo_data.get("algoStatus", "?"))
+        symbol = algo_data.get("s", algo_data.get("symbol", "?"))
+        order_type = algo_data.get("ot", algo_data.get("orderType", "?"))
+        side = algo_data.get("S", algo_data.get("side", "?"))
+
+        log.info(
+            "ALGO_UPDATE: %s %s %s algoId=%s status=%s",
+            symbol, side, order_type, algo_id, algo_status,
+        )
+
+        if algo_status in ("TRIGGERED", "FILLED"):
+            log.info(
+                "ALGO TRIGGERED: %s %s %s — child fill expected via ORDER_TRADE_UPDATE",
+                symbol, side, order_type,
+            )
 
     # ─── Helpers ─────────────────────────────────────────────
 
