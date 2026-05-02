@@ -22,7 +22,7 @@ import logging
 import time
 from datetime import datetime, timezone
 
-from dashrock.adapters.base import ExecutionAdapter, OrderNotFoundError
+from dashrock.adapters.base import ExecutionAdapter, ExchangeError, OrderNotFoundError
 from dashrock.config import Config
 from dashrock.core.events import (
     EventBus,
@@ -454,36 +454,73 @@ class ExecutionManager:
             ))
             emergency_sl_price = self._registry.round_price(fill.symbol, emergency_sl_price)
 
-            # Retry up to 3 times — testnet can intermittently reject orders
+            # Retry up to 3 times — transient exchange errors can be retried.
+            # -2021 (would immediately trigger) is NOT transient: the price has
+            # already moved past the SL level — close at market immediately.
             emergency_sl = None
+            sl_immediately_triggered = False
             for attempt in range(1, 4):
-                emergency_sl = await self._safe_place_order(OrderIntent(
-                    symbol=fill.symbol, side=sl_side,
-                    order_type=OrderType.STOP_MARKET,
-                    stop_price=emergency_sl_price, quantity=fill.quantity,
-                    reduce_only=True, tag=f"sl_emergency_{int(time.time()*1000)}",
-                ))
-                if emergency_sl:
+                try:
+                    order = await self._adapter.place_order(OrderIntent(
+                        symbol=fill.symbol, side=sl_side,
+                        order_type=OrderType.STOP_MARKET,
+                        stop_price=emergency_sl_price, quantity=fill.quantity,
+                        reduce_only=True, tag=f"sl_emergency_{int(time.time()*1000)}",
+                    ))
+                    await self._bus.publish(OrderPlaced(order=order))
+                    emergency_sl = order
                     break
-                log.warning(
-                    "EMERGENCY SL attempt %d/3 failed for %s — retrying in 500ms",
-                    attempt, fill.symbol,
-                )
-                await asyncio.sleep(0.5)
+                except ExchangeError as e:
+                    if e.code == -2021:
+                        # Price already breached SL — close at market immediately
+                        log.warning(
+                            "EMERGENCY SL -2021 for %s: price already past SL %.8g "
+                            "— closing position at market",
+                            fill.symbol, emergency_sl_price,
+                        )
+                        sl_immediately_triggered = True
+                        break
+                    log.warning(
+                        "EMERGENCY SL attempt %d/3 failed for %s — retrying in 500ms",
+                        attempt, fill.symbol,
+                    )
+                    await asyncio.sleep(0.5)
+                except Exception:
+                    log.warning(
+                        "EMERGENCY SL attempt %d/3 failed for %s — retrying in 500ms",
+                        attempt, fill.symbol,
+                    )
+                    await asyncio.sleep(0.5)
 
-            if emergency_sl:
+            if sl_immediately_triggered:
+                # SL level already breached — send a market close now
+                log.error(
+                    "EMERGENCY MARKET CLOSE: %s SL level %.8g already breached — closing at market",
+                    fill.symbol, emergency_sl_price,
+                )
+                try:
+                    close_order = await self._adapter.place_order(OrderIntent(
+                        symbol=fill.symbol, side=sl_side,
+                        order_type=OrderType.MARKET,
+                        stop_price=None, quantity=fill.quantity,
+                        reduce_only=True, tag=f"sl_market_close_{int(time.time()*1000)}",
+                    ))
+                    log.info(
+                        "EMERGENCY MARKET CLOSE sent for %s → order %s",
+                        fill.symbol, close_order.order_id if close_order else "?",
+                    )
+                except Exception:
+                    log.exception("EMERGENCY MARKET CLOSE failed for %s!", fill.symbol)
+                # State will be updated when the market close fill arrives
+                # via context-based fill matching
+                state.sl_price = emergency_sl_price
+            elif emergency_sl:
                 state.sl_id = emergency_sl.order_id
                 state.sl_price = emergency_sl_price
                 log.info(
                     "EMERGENCY SL placed: %s @ %.8g (%.2f%% from entry)",
                     fill.symbol, emergency_sl_price, self._cfg.stops.sl_pips,
                 )
-            else:
-                log.error(
-                    "CRITICAL: EMERGENCY SL failed after 3 attempts for %s! Position unprotected!",
-                    fill.symbol,
-                )
-                state.sl_price = emergency_sl_price  # set so reconciliation can fix it
 
             # 2. Place native trailing stop (for profit protection once activated)
             activate_price = None
