@@ -36,15 +36,15 @@ equity:
   source: auto
   manual_value: 50.0
 stops:
-  sl_pips: 2.0
-  tp_pips: 6.0
+  sl_pips: 4.0
+  tp_pips: 15.0
   use_pct_pips: false
 trailing:
   enabled: true
   mode: binance_native
   step_pips: 0.5
-  stop_pips: 3.0
-  activation_pips: 4.0
+  stop_pips: 4.0
+  activation_pips: 8.0
   use_pct_pips: false
 reversed_order:
   mode: cancel
