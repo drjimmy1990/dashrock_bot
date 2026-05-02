@@ -687,32 +687,26 @@ class BinanceLiveAdapter(ExecutionAdapter):
     async def _handle_algo_update(self, msg: dict) -> None:
         """Handle ALGO_UPDATE events from live Binance.
 
-        On live Binance, conditional orders (STOP_MARKET, TRAILING_STOP_MARKET)
-        emit ALGO_UPDATE when triggered, NOT ORDER_TRADE_UPDATE.
-        When status is TRIGGERED, we know the algo order fired.
-        The child order fill will arrive via ORDER_TRADE_UPDATE with a different
-        orderId — our context-based fill matching in the manager handles this.
-
-        We log ALGO_UPDATE events for debugging. If the algo is TRIGGERED,
-        the follow-up ORDER_TRADE_UPDATE with FILLED status will be handled
-        by _handle_order_update + context matching in the execution manager.
+        ALGO_UPDATE wraps data in 'ao' key with these fields:
+          s  = symbol, S = side, ot = orderType
+          ai = algoId, as = algoStatus, ci = clientAlgoId
         """
-        algo_data = msg.get("o", {})
-        algo_id = algo_data.get("ai", algo_data.get("algoId", "?"))
-        algo_status = algo_data.get("as", algo_data.get("algoStatus", "?"))
-        symbol = algo_data.get("s", algo_data.get("symbol", "?"))
-        order_type = algo_data.get("ot", algo_data.get("orderType", "?"))
-        side = algo_data.get("S", algo_data.get("side", "?"))
+        algo_data = msg.get("ao") or msg.get("o") or {}
+        algo_id = algo_data.get("ai", "?")
+        algo_status = algo_data.get("as", "?")
+        symbol = algo_data.get("s", "?")
+        order_type = algo_data.get("ot", "?")
+        side = algo_data.get("S", "?")
 
-        log.info(
+        log.debug(
             "ALGO_UPDATE: %s %s %s algoId=%s status=%s",
             symbol, side, order_type, algo_id, algo_status,
         )
 
-        if algo_status in ("TRIGGERED", "FILLED"):
+        if algo_status == "TRIGGERED":
             log.info(
-                "ALGO TRIGGERED: %s %s %s — child fill expected via ORDER_TRADE_UPDATE",
-                symbol, side, order_type,
+                "ALGO TRIGGERED: %s %s %s algoId=%s — child fill coming via ORDER_TRADE_UPDATE",
+                symbol, side, order_type, algo_id,
             )
 
     # ─── Helpers ─────────────────────────────────────────────
