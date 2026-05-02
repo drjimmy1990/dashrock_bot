@@ -255,13 +255,14 @@ class ExecutionManager:
         except ExchangeError as e:
             if e.code == -2021:
                 # Price blew past the entry stop before the order landed.
-                # This is a fast-market skip, not an error — the opposite
-                # direction entry order will still be placed normally.
+                # Cancel the opposite entry and start a fresh cooldown cycle
+                # so the strategy re-evaluates with updated channel levels.
                 log.info(
-                    "MISSED BREAKOUT: %s %s entry @ %.8g — price already moved past "
-                    "stop (fast market). Skipping this direction.",
+                    "MISSED BREAKOUT: %s %s entry @ %.8g — price already past stop. "
+                    "Cancelling opposite entry and starting fresh cycle.",
                     side_label.upper(), state.symbol, price,
                 )
+                await self._reset_on_missed_breakout(state, missed_side=side_label)
             else:
                 log.error("Failed to place order for %s: %s", state.symbol, e)
             return
@@ -925,6 +926,44 @@ class ExecutionManager:
                     state.sl_id = None
 
     # ─── Helpers ─────────────────────────────────────────
+
+    async def _reset_on_missed_breakout(self, state: SymbolExecutionState, missed_side: str) -> None:
+        """Cancel the opposite entry order and start a cooldown cycle.
+
+        Called when an entry order is rejected with -2021 (price already
+        blew past the stop). We treat this identically to a trade close:
+        cancel the opposite pending entry, wipe all entry state, and
+        start the cooldown so the strategy re-evaluates fresh.
+        """
+        # Cancel the opposite pending entry (the one we DID place)
+        opposite_id: str | None
+        if missed_side == "buy":
+            opposite_id = state.entry_sell_id
+        else:
+            opposite_id = state.entry_buy_id
+
+        if opposite_id:
+            log.info(
+                "MISSED BREAKOUT reset: cancelling opposite %s entry %s",
+                "sell" if missed_side == "buy" else "buy",
+                opposite_id,
+            )
+            await self._safe_cancel(state.symbol, opposite_id)
+
+        # Wipe all entry state (no position was opened)
+        state.entry_buy_id = None
+        state.entry_buy_stop_price = None
+        state.entry_sell_id = None
+        state.entry_sell_stop_price = None
+
+        # Start cooldown — strategy will re-compute on next candle with fresh levels
+        state.cooldown_remaining = self._cfg.strategy.cooldown_candles
+        log.info(
+            "MISSED BREAKOUT reset: %s cooldown started (%d candles) — fresh cycle",
+            state.symbol, self._cfg.strategy.cooldown_candles,
+        )
+
+        await self._persist_state(state.symbol)
 
     async def _safe_place_order(self, intent: OrderIntent) -> LiveOrder | None:
         """Place an order safely, returning None if the adapter raises an error."""
