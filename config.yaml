@@ -3,19 +3,18 @@ watchlist:
 - BTCUSDT
 - ETHUSDT
 - SOLUSDT
-- XAGUSDT
-- CHRUSDT
+- XAUUSDT
 trade_list:
-- CHRUSDT
+- XAUUSDT
 timeframe: 1m
 strategy:
   name: donchian_breakout
-  lookback_candles: 3
-  offset_pips: 0.05
+  lookback_candles: 5
+  offset_pips: 0.5
   pending_refresh_mode: fixed
   cooldown_candles: 1
   cooldown_trigger: any_close
-  use_pct_pips: true
+  use_pct_pips: false
   min_channel_width_pct: 0.0
   regime_detection:
     enabled: false
@@ -26,9 +25,9 @@ strategy:
   params: {}
 sizing:
   mode: equity_fraction
-  risk_per_trade_pct: 0.2
+  risk_per_trade_pct: 0.5
   fallback_fixed_usd: 10.0
-  leverage: 50
+  leverage: 20
 portfolio_risk:
   max_open_positions: 3
   max_total_exposure_pct: 300.0
@@ -37,16 +36,16 @@ equity:
   source: auto
   manual_value: 50.0
 stops:
-  sl_pips: 0.6
-  tp_pips: 0.0
-  use_pct_pips: true
+  sl_pips: 2.0
+  tp_pips: 6.0
+  use_pct_pips: false
 trailing:
   enabled: true
   mode: binance_native
-  step_pips: 0.05
-  stop_pips: 0.35
-  activation_pips: 0.6
-  use_pct_pips: true
+  step_pips: 0.5
+  stop_pips: 3.0
+  activation_pips: 4.0
+  use_pct_pips: false
 reversed_order:
   mode: cancel
 time_filter:
