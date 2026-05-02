@@ -10,7 +10,7 @@ trade_list:
 timeframe: 1m
 strategy:
   name: donchian_breakout
-  lookback_candles: 2
+  lookback_candles: 3
   offset_pips: 0.05
   pending_refresh_mode: fixed
   cooldown_candles: 1
@@ -26,7 +26,7 @@ strategy:
   params: {}
 sizing:
   mode: equity_fraction
-  risk_per_trade_pct: 0.25
+  risk_per_trade_pct: 0.2
   fallback_fixed_usd: 10.0
   leverage: 50
 portfolio_risk:
@@ -37,15 +37,15 @@ equity:
   source: auto
   manual_value: 50.0
 stops:
-  sl_pips: 0.3
+  sl_pips: 0.6
   tp_pips: 0.0
   use_pct_pips: true
 trailing:
   enabled: true
   mode: binance_native
   step_pips: 0.05
-  stop_pips: 0.2
-  activation_pips: 0.3
+  stop_pips: 0.35
+  activation_pips: 0.6
   use_pct_pips: true
 reversed_order:
   mode: cancel
