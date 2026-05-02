@@ -1,12 +1,12 @@
-mode: testnet
+mode: live
 watchlist:
 - BTCUSDT
 - ETHUSDT
 - SOLUSDT
-- BNBUSDT
 - XAGUSDT
+- CHRUSDT
 trade_list:
-- XAGUSDT
+- CHRUSDT
 timeframe: 1m
 strategy:
   name: donchian_breakout
@@ -26,9 +26,9 @@ strategy:
   params: {}
 sizing:
   mode: equity_fraction
-  risk_per_trade_pct: 0.2
+  risk_per_trade_pct: 0.25
   fallback_fixed_usd: 10.0
-  leverage: 100
+  leverage: 50
 portfolio_risk:
   max_open_positions: 3
   max_total_exposure_pct: 300.0
@@ -37,7 +37,7 @@ equity:
   source: auto
   manual_value: 50.0
 stops:
-  sl_pips: 0.2
+  sl_pips: 0.3
   tp_pips: 0.0
   use_pct_pips: true
 trailing:
@@ -71,13 +71,13 @@ simulator:
   funding_rate_pct: 0.01
   latency_ms: 0
 volatility:
-  mode: composite
+  mode: normalized_atr
   weights:
     natr: 0.4
     expansion: 0.3
     donchian_atr: 0.3
-  min_score: 0.2
-  min_24h_volume_usd: 5000000.0
+  min_score: 0.0
+  min_24h_volume_usd: 5000.0
 safety:
   max_daily_loss_pct: 5.0
   max_drawdown_pct: 15.0
@@ -93,7 +93,7 @@ auth:
   enabled: true
   token_expiry_hours: 24
 logging:
-  level: INFO
+  level: DEBUG
   file: logs/bot.log
   max_size_mb: 50
 notifications:
