@@ -7,6 +7,24 @@ import logging
 import time
 from typing import Any
 
+
+class _Cache:
+    """Simple TTL cache for a single value."""
+    def __init__(self, ttl_sec: float) -> None:
+        self._ttl = ttl_sec
+        self._value: Any = None
+        self._ts: float = 0.0
+
+    def get(self) -> tuple[bool, Any]:
+        if time.monotonic() - self._ts < self._ttl:
+            return True, self._value
+        return False, None
+
+    def set(self, value: Any) -> Any:
+        self._value = value
+        self._ts = time.monotonic()
+        return value
+
 from fastapi import APIRouter, Depends, HTTPException
 
 from dashrock.api.auth import authenticate, require_auth
@@ -27,6 +45,11 @@ def create_routes(state: EngineState, auth_enabled: bool = True) -> APIRouter:
     router = APIRouter(prefix="/api")
     auth_dep = [Depends(require_auth)] if auth_enabled else []
     _config_lock = asyncio.Lock()
+
+    # TTL caches — avoids hammering Binance on every dashboard refresh
+    _equity_cache = _Cache(ttl_sec=15)
+    _positions_cache = _Cache(ttl_sec=5)
+    _orders_cache = _Cache(ttl_sec=15)
 
     def _require_ready() -> None:
         if state.adapter is None or state.config is None:
@@ -219,8 +242,11 @@ def create_routes(state: EngineState, auth_enabled: bool = True) -> APIRouter:
         _require_ready()
         if state.adapter is None:
             raise HTTPException(status_code=503, detail="Engine not ready")
+        hit, cached = _equity_cache.get()
+        if hit:
+            return cached
         equity = await state.adapter.get_equity_usd()
-        return {"equity_usd": equity}
+        return _equity_cache.set({"equity_usd": equity})
 
     @router.get("/equity/history", response_model=list[EquitySnapshotResponse], dependencies=auth_dep)
     async def get_equity_history(limit: int = 100) -> list[EquitySnapshotResponse]:
@@ -263,6 +289,9 @@ def create_routes(state: EngineState, auth_enabled: bool = True) -> APIRouter:
         _require_ready()
         if state.config is None or state.adapter is None:
             raise HTTPException(status_code=503, detail="Engine not ready")
+        hit, cached = _positions_cache.get()
+        if hit:
+            return cached
         result = []
         for symbol in state.config.trade_list:
             pos = await state.adapter.get_position(symbol)
@@ -286,7 +315,7 @@ def create_routes(state: EngineState, auth_enabled: bool = True) -> APIRouter:
                 trailing_watermark=sym_status.get("trailing_watermark", 0),
                 opened_at_ms=pos.opened_at_ms,
             ))
-        return result
+        return _positions_cache.set(result)
 
     # ─── Orders ──────────────────────────────────────
 
@@ -295,6 +324,9 @@ def create_routes(state: EngineState, auth_enabled: bool = True) -> APIRouter:
         _require_ready()
         if state.config is None or state.adapter is None:
             raise HTTPException(status_code=503, detail="Engine not ready")
+        hit, cached = _orders_cache.get()
+        if hit:
+            return cached
         all_orders = []
         orders = await state.adapter.get_all_open_orders()
         # Filter strictly by watchlist since it pulls the whole account
@@ -307,7 +339,7 @@ def create_routes(state: EngineState, auth_enabled: bool = True) -> APIRouter:
                     stop_price=o.stop_price, quantity=o.quantity,
                     status=o.status.value, reduce_only=o.reduce_only, tag=o.tag,
                 ))
-        return all_orders
+        return _orders_cache.set(all_orders)
 
     # ─── PnL ─────────────────────────────────────────
 
