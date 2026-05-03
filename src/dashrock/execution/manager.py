@@ -170,10 +170,30 @@ class ExecutionManager:
             state, "buy", desired.buy_stop, equity, desired.reference_price,
         )
 
+        # If the buy entry filled instantly (price was already there),
+        # a position is now open — do NOT place the opposite sell entry.
+        if state.has_position:
+            log.info(
+                "Skipping sell entry for %s — buy entry already filled (instant breakout)",
+                symbol,
+            )
+            await self._persist_state(symbol)
+            return
+
         # Handle sell stop
         await self._reconcile_entry(
             state, "sell", desired.sell_stop, equity, desired.reference_price,
         )
+
+        # If the sell entry filled instantly, cancel the buy entry we placed above.
+        if state.has_position and state.entry_buy_id:
+            log.info(
+                "Sell entry filled instantly for %s — cancelling orphaned buy entry %s",
+                symbol, state.entry_buy_id,
+            )
+            await self._safe_cancel(symbol, state.entry_buy_id)
+            state.entry_buy_id = None
+            state.entry_buy_stop_price = None
 
         await self._persist_state(symbol)
 
