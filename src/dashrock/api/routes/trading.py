@@ -128,7 +128,7 @@ def create_routes(state: EngineState, auth_enabled: bool = True) -> APIRouter:
 
                 # Reconfigure execution manager's config reference
                 if state.manager:
-                    state.manager._cfg = new_cfg
+                    state.manager.update_config(new_cfg)
 
                 log.info("Config hot-reloaded via API")
             except Exception as e:

@@ -76,6 +76,21 @@ class ExecutionManager:
         self._last_tick_time: dict[str, float] = {}  # throttle trailing updates
         self._tick_locks: dict[str, asyncio.Lock] = {}  # prevent concurrent trailing
 
+    def update_config(self, new_cfg: Config) -> None:
+        """Hot-reload: propagate config to ALL sub-components.
+
+        Called by the API hot-reload handler. Without this, sub-components
+        like TrailingManager keep a stale config snapshot.
+        """
+        old_mode = self._cfg.trailing.mode if self._cfg else None
+        self._cfg = new_cfg
+        self._trailing._cfg = new_cfg.trailing
+        if old_mode != new_cfg.trailing.mode:
+            log.info(
+                "Trailing mode changed: %s → %s",
+                old_mode, new_cfg.trailing.mode,
+            )
+
     # ─── State Management ────────────────────────────────
 
     def get_state(self, symbol: str) -> SymbolExecutionState:
@@ -484,6 +499,22 @@ class ExecutionManager:
             # ── Binance Native Trailing Stop + Fixed Emergency SL ──
             # Two orders: fixed SL for downside protection + trailing for profit locking.
             callback_rate = self._cfg.trailing.stop_pips  # maps directly to callbackRate %
+            if not self._cfg.trailing.use_pct_pips:
+                # stop_pips is in USD — convert to % for Binance API
+                callback_rate = (self._cfg.trailing.stop_pips / fill.price) * 100.0
+                callback_rate = round(callback_rate, 2)  # Binance accepts 2 decimal places
+                if callback_rate < 0.1:
+                    callback_rate = 0.1  # Binance minimum
+                    log.warning(
+                        "Callback rate %.4f%% below Binance min 0.1%% for %s — clamped to 0.1%%",
+                        (self._cfg.trailing.stop_pips / fill.price) * 100.0, fill.symbol,
+                    )
+                elif callback_rate > 5.0:
+                    callback_rate = 5.0  # Binance maximum
+                    log.warning(
+                        "Callback rate %.2f%% above Binance max 5%% for %s — clamped to 5%%",
+                        (self._cfg.trailing.stop_pips / fill.price) * 100.0, fill.symbol,
+                    )
 
             # 1. Place FIXED emergency SL first (uses sl_pips from stops config)
             emergency_sl_price = self._calculate_sl_price(OrderIntent(
@@ -557,17 +588,26 @@ class ExecutionManager:
                 state.sl_id = emergency_sl.order_id
                 state.sl_price = emergency_sl_price
                 log.info(
-                    "EMERGENCY SL placed: %s @ %.8g (%.2f%% from entry)",
+                    "EMERGENCY SL placed: %s @ %.8g (sl_pips=%.4f %s from entry)",
                     fill.symbol, emergency_sl_price, self._cfg.stops.sl_pips,
+                    "%" if self._cfg.stops.use_pct_pips else "USD",
                 )
 
             # 2. Place native trailing stop (for profit protection once activated)
             activate_price = None
             if self._cfg.trailing.activation_pips > 0:
-                if fill.side == OrderSide.BUY:  # LONG — activate when price rises
-                    activate_price = fill.price * (1 + self._cfg.trailing.activation_pips / 100.0)
-                else:  # SHORT — activate when price drops
-                    activate_price = fill.price * (1 - self._cfg.trailing.activation_pips / 100.0)
+                if self._cfg.trailing.use_pct_pips:
+                    # activation_pips is a percentage
+                    if fill.side == OrderSide.BUY:
+                        activate_price = fill.price * (1 + self._cfg.trailing.activation_pips / 100.0)
+                    else:
+                        activate_price = fill.price * (1 - self._cfg.trailing.activation_pips / 100.0)
+                else:
+                    # activation_pips is a USD distance
+                    if fill.side == OrderSide.BUY:
+                        activate_price = fill.price + self._cfg.trailing.activation_pips
+                    else:
+                        activate_price = fill.price - self._cfg.trailing.activation_pips
                 activate_price = self._registry.round_price(fill.symbol, activate_price)
 
             tsl_order = await self._safe_place_order(OrderIntent(
