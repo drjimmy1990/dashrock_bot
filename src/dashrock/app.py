@@ -587,20 +587,24 @@ class Application:
         try:
             equity = await self.adapter.get_equity_usd()
         except Exception:
-            log.warning("Failed to fetch equity for %s — using 0", symbol, exc_info=True)
-            equity = 0.0
+            log.warning("Failed to fetch equity for %s — skipping safety check this candle", symbol, exc_info=True)
+            equity = None  # None = skip drawdown check, not 0
 
         try:
             daily_pnl = await self.repo.get_todays_realized_pnl() if self.repo else 0
-            hw = await self.repo.get_equity_high_water() if self.repo else equity
+            hw = await self.repo.get_equity_high_water() if self.repo else (equity or 0)
             losses = await self.repo.get_consecutive_losses() if self.repo else 0
         except Exception:
             log.warning("Failed to fetch safety metrics — skipping safety check", exc_info=True)
-            daily_pnl, hw, losses = 0, equity, 0
+            daily_pnl, hw, losses = 0, equity or 0, 0
 
+        # Only run drawdown check if we have a valid equity reading
         safety = self.safety.check(
             daily_pnl=daily_pnl, starting_equity=self.cfg.simulator.starting_equity_usd,
-            current_equity=equity, high_water_equity=hw, consecutive_losses=losses,
+            current_equity=equity if equity is not None else hw,  # fallback to hw = 0% drawdown
+            high_water_equity=hw,
+            consecutive_losses=losses,
+            skip_drawdown=equity is None,  # skip drawdown if equity fetch failed
         ) if self.safety else None
 
         if safety and not safety.trading_allowed:

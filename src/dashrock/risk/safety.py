@@ -53,6 +53,7 @@ class SafetyMonitor:
         current_equity: float = 0.0,
         high_water_equity: float = 0.0,
         consecutive_losses: int = 0,
+        skip_drawdown: bool = False,
     ) -> SafetyResult:
         """Full safety check. Called on candle close and throttled ticks."""
 
@@ -64,8 +65,8 @@ class SafetyMonitor:
                 log.error("SAFETY TRIGGERED: %s", reason)
                 return SafetyResult(trading_allowed=False, reason=reason)
 
-        # Drawdown check
-        if self.cfg.max_drawdown_pct > 0 and high_water_equity > 0:
+        # Drawdown check — skip if equity fetch failed (avoids false 100% on API timeout)
+        if not skip_drawdown and self.cfg.max_drawdown_pct > 0 and high_water_equity > 0:
             dd_pct = (1 - current_equity / high_water_equity) * 100
             if dd_pct >= self.cfg.max_drawdown_pct:
                 reason = f"drawdown: {dd_pct:.1f}% >= {self.cfg.max_drawdown_pct}%"
