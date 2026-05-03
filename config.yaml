@@ -45,7 +45,7 @@ trailing:
   mode: binance_native
   step_pips: 0.05
   stop_pips: 0.35
-  activation_pips: 0.6
+  activation_pips: 0.8
   use_pct_pips: true
 reversed_order:
   mode: cancel
@@ -93,7 +93,7 @@ auth:
   enabled: true
   token_expiry_hours: 24
 logging:
-  level: DEBUG
+  level: INFO
   file: logs/bot.log
   max_size_mb: 50
 notifications:
