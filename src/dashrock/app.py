@@ -510,20 +510,17 @@ class Application:
     async def run(self) -> None:
         await self.initialize()
         
-        # Determine whether to boot paused or running
-        any_open = False
+        # Always boot into running state so overnight restarts don't stall trading.
+        # Safety circuit breakers will pause if limits are breached.
         if self.manager:
             for sym in self.cfg.trade_list:
                 state = self.manager.get_state(sym)
                 has_orders = any([state.entry_buy_id, state.entry_sell_id, state.sl_id, state.tp_id])
                 if state.has_position or has_orders:
-                    any_open = True
+                    log.info("Boot: found active state for %s — resuming.", sym)
                     break
-        
-        if any_open:
-            self.sm.start("resuming active trades")
-        else:
-            self.sm.pause("booted paused (no active trades)")
+
+        self.sm.start("auto-start on boot")
 
         # Start API server
         api = create_api(self._engine_state, auth_enabled=self.cfg.auth.enabled)  # type: ignore

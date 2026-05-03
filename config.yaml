@@ -3,18 +3,19 @@ watchlist:
 - BTCUSDT
 - ETHUSDT
 - SOLUSDT
-- XAUUSDT
+- XAGUSDT
+- CHRUSDT
 trade_list:
-- XAUUSDT
+- CHRUSDT
 timeframe: 1m
 strategy:
   name: donchian_breakout
-  lookback_candles: 5
-  offset_pips: 0.5
+  lookback_candles: 3
+  offset_pips: 0.05
   pending_refresh_mode: fixed
   cooldown_candles: 1
   cooldown_trigger: any_close
-  use_pct_pips: false
+  use_pct_pips: true
   min_channel_width_pct: 0.0
   regime_detection:
     enabled: false
@@ -25,9 +26,9 @@ strategy:
   params: {}
 sizing:
   mode: equity_fraction
-  risk_per_trade_pct: 0.5
+  risk_per_trade_pct: 0.2
   fallback_fixed_usd: 10.0
-  leverage: 20
+  leverage: 50
 portfolio_risk:
   max_open_positions: 3
   max_total_exposure_pct: 300.0
@@ -36,16 +37,16 @@ equity:
   source: auto
   manual_value: 50.0
 stops:
-  sl_pips: 4.0
-  tp_pips: 15.0
-  use_pct_pips: false
+  sl_pips: 0.6
+  tp_pips: 0.0
+  use_pct_pips: true
 trailing:
   enabled: true
   mode: binance_native
-  step_pips: 0.5
-  stop_pips: 4.0
-  activation_pips: 8.0
-  use_pct_pips: false
+  step_pips: 0.05
+  stop_pips: 0.35
+  activation_pips: 0.6
+  use_pct_pips: true
 reversed_order:
   mode: cancel
 time_filter:
@@ -65,7 +66,7 @@ slippage:
 simulator:
   taker_fee_pct: 0.04
   slippage_noise_pips: 0.01
-  starting_equity_usd: 1000.0
+  starting_equity_usd: 50.0
   simulate_funding: true
   funding_rate_pct: 0.01
   latency_ms: 0
@@ -80,7 +81,7 @@ volatility:
 safety:
   max_daily_loss_pct: 5.0
   max_drawdown_pct: 15.0
-  max_consecutive_losses: 5
+  max_consecutive_losses: 10
   check_on_tick: true
   tick_check_interval: 100
   orphan_order_policy: alert_only
