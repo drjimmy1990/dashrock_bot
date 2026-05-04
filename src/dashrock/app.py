@@ -144,7 +144,7 @@ class Application:
             symbols=self.cfg.trade_list,
             timeframes=[self.cfg.timeframe],
             ws_factory=create_binance_ws_factory(self.cfg.timeframe, mode=self.cfg.mode),
-            window_size=200,
+            window_size=1000,
         )
 
         # 8b. Seed chart with historical candles from Binance public API
@@ -203,7 +203,7 @@ class Application:
             for sym in self.cfg.trade_list:
                 try:
                     r = await client.get(base, params={
-                        "symbol": sym.upper(), "interval": self.cfg.timeframe, "limit": 200,
+                        "symbol": sym.upper(), "interval": self.cfg.timeframe, "limit": 1000,
                     })
                     if r.status_code != 200:
                         log.warning("Failed to seed %s: HTTP %d", sym, r.status_code)
