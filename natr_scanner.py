@@ -73,4 +73,4 @@ def run_script(timeframe ):
 
 
 
-run_script("4h" )
+run_script("1m" )

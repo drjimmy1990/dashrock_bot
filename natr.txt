@@ -1,0 +1,1 @@
+C:\Python313\python.exe "c:\Users\LOQ\Desktop\python\natr-scanner.py"

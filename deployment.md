@@ -40,7 +40,7 @@ git --version
 
 ```powershell
 cd C:\Users\$env:USERNAME\Desktop
-git clone <your-repo-url> dashrock-v2
+git clone https://github.com/drjimmy1990/dashrock_bot.git dashrock-v2
 cd dashrock-v2
 ```
 

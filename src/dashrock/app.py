@@ -439,6 +439,35 @@ class Application:
                             local_state.tsl_id = tsl_order.order_id
                             log.info("RECONCILE: TSL re-placed for %s", sym)
 
+                    # Cancel orphan ENTRY orders — these should NOT exist when position is open
+                    known_ids = {local_state.sl_id, local_state.tp_id, local_state.tsl_id}
+                    known_ids.discard(None)
+                    for order in exchange_orders:
+                        if order.order_id not in known_ids:
+                            tag = order.tag or ""
+                            # This is an orphan — cancel it
+                            try:
+                                await self.adapter.cancel_order(sym, order.order_id)
+                                log.warning(
+                                    "RECONCILE: Cancelled orphan order %s for %s (%s %s stop=%s tag=%s)",
+                                    order.order_id, sym,
+                                    order.side.value if order.side else "?",
+                                    order.order_type.value if order.order_type else "?",
+                                    order.stop_price, tag,
+                                )
+                            except Exception:
+                                log.warning(
+                                    "RECONCILE: Failed to cancel orphan order %s for %s",
+                                    order.order_id, sym, exc_info=True,
+                                )
+
+                    # Clear stale entry IDs since position is already open
+                    local_state.entry_buy_id = None
+                    local_state.entry_buy_stop_price = None
+                    local_state.entry_sell_id = None
+                    local_state.entry_sell_stop_price = None
+                    await self.manager._persist_state(sym)
+
                     log.info(
                         "RECONCILE: %s state consistent — %s qty=%.8g sl=%s tsl=%s",
                         sym, local_state.position_state.value, local_state.position_qty,
@@ -446,7 +475,39 @@ class Application:
                     )
 
                 else:
-                    log.debug("RECONCILE: %s — both flat, OK", sym)
+                    # Case 4: Both flat — BUT check for orphan orders on exchange
+                    if exchange_orders:
+                        log.warning(
+                            "RECONCILE: %s — both FLAT but %d orphan orders on exchange! Cancelling all...",
+                            sym, len(exchange_orders),
+                        )
+                        for order in exchange_orders:
+                            try:
+                                await self.adapter.cancel_order(sym, order.order_id)
+                                log.info(
+                                    "RECONCILE: Cancelled orphan %s %s order %s (stop=%s tag=%s)",
+                                    sym, order.side.value if order.side else "?",
+                                    order.order_id,
+                                    order.stop_price, order.tag or "?",
+                                )
+                            except Exception:
+                                log.warning(
+                                    "RECONCILE: Failed to cancel orphan order %s for %s",
+                                    order.order_id, sym, exc_info=True,
+                                )
+                        # Also clear any stale IDs in engine state
+                        local_state.entry_buy_id = None
+                        local_state.entry_buy_stop_price = None
+                        local_state.entry_sell_id = None
+                        local_state.entry_sell_stop_price = None
+                        local_state.sl_id = None
+                        local_state.sl_price = None
+                        local_state.tp_id = None
+                        local_state.tp_price = None
+                        local_state.tsl_id = None
+                        await self.manager._persist_state(sym)
+                    else:
+                        log.debug("RECONCILE: %s — both flat, OK", sym)
 
             except Exception:
                 log.error("RECONCILE: Failed for %s", sym, exc_info=True)
